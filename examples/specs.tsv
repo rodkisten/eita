@@ -1,0 +1,5 @@
+# Comando<TAB>Descricao
+git commit --fixup	Cria um commit fixup
+git log --graph --oneline	Historico visual compacto
+gh pr checks	Exibe verificacoes do pull request
+docker compose logs -f	Acompanha logs dos servicos
