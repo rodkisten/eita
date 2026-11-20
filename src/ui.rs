@@ -16,6 +16,7 @@ pub fn pick(
     catalog: &[Candidate],
     context: &Context,
     usage: &Usage,
+    height: u16,
 ) -> io::Result<Option<Applied>> {
     let Some(initial) = context.query() else {
         return Ok(None);
@@ -25,7 +26,7 @@ pub fn pick(
     let mut terminal = match Terminal::with_options(
         backend,
         TerminalOptions {
-            viewport: Viewport::Inline(10),
+            viewport: Viewport::Inline(height),
         },
     ) {
         Ok(terminal) => terminal,
@@ -60,7 +61,7 @@ fn run_loop(
         terminal.draw(|frame| {
             let [header, list_area, footer] = Layout::vertical([
                 Constraint::Length(3),
-                Constraint::Min(5),
+                Constraint::Min(2),
                 Constraint::Length(1),
             ])
             .areas(frame.area());
@@ -93,7 +94,7 @@ fn run_loop(
                 state.select(Some(selected));
             }
             frame.render_stateful_widget(list, list_area, &mut state);
-            frame.render_widget("↑↓ navegar · Tab/Enter aceitar · Esc cancelar", footer);
+            frame.render_widget("↑↓ mover · Enter aceitar · Esc fechar", footer);
         })?;
 
         if let Event::Key(key) = event::read()? {

@@ -66,6 +66,7 @@ jobs:
           ! grep -F 'never-persist-this' "$RUNNER_TEMP/eita-usage.json"
           EITA_USAGE_ENABLED=1 EITA_USAGE_FILE="$RUNNER_TEMP/eita-usage.json" ./target/release/eita usage status | grep -F 'git commit'
           ./target/release/eita bench --iterations 25 --compare | grep -F 'nucleo-matcher'
+          ./target/release/eita popup --help | grep -F -- '--height'
           ./target/release/eita bench --iterations 50
       - name: Check installer syntax
         run: sh -n install.sh

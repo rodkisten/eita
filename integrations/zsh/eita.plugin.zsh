@@ -172,3 +172,21 @@ eita-usage-off() {
   add-zsh-hook -d preexec _eita_usage_preexec 2>/dev/null
   print -r -- '🦀 Eita ranking OFF'
 }
+
+
+# Direct interactive demo for mobile SSH terminals.
+# Unlike the inline/bench commands, this opens a real Ratatui picker.
+eita-popup() {
+  emulate -L zsh
+  local query="${*:-git com}"
+  command eita popup --line "$query" --height 8
+}
+
+eita-keys() {
+  emulate -L zsh
+  print -r -- '🦀 Ctrl+Space / Ctrl+X Ctrl+P = picker Ratatui'
+  print -r -- '   Ctrl+X Ctrl+E = accept ghost text'
+  bindkey '^@'
+  bindkey '^X^P'
+  bindkey '^X^E'
+}

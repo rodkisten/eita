@@ -14,7 +14,7 @@ command -v tar >/dev/null 2>&1 || die "tar is required"
 command -v install >/dev/null 2>&1 || die "install is required"
 
 case "$(uname -s)" in
-  Linux) os=unknown-linux-gnu ;;
+  Linux) os=unknown-linux-musl ;;
   Darwin) os=apple-darwin ;;
   *) die "unsupported operating system: $(uname -s)" ;;
 esac
@@ -74,8 +74,11 @@ mkdir -p "$install_dir" "$plugin_dir"
 install -m 0755 "$tmpdir/eita" "$install_dir/eita"
 install -m 0644 "$tmpdir/integrations/zsh/eita.plugin.zsh" "$plugin_dir/eita.plugin.zsh"
 
-"$install_dir/eita" --version
+if ! "$install_dir/eita" --version; then
+  die "installed binary did not launch correctly; installation failed"
+fi
 printf '\n✓ Installed: %s\n' "$install_dir/eita"
 printf '✓ Zsh plugin: %s\n' "$plugin_dir/eita.plugin.zsh"
 printf '\nRun: %s suggest --line "git comit"\n' "$install_dir/eita"
+printf 'Popup test: %s popup --line "git com"\n' "$install_dir/eita"
 printf 'For Ctrl+Space completion, add the install directory to PATH and source the plugin in ~/.zshrc.\n'

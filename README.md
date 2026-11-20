@@ -156,6 +156,42 @@ eita usage status
 Os dois modos são desativados por padrão. Veja o [guia de autocomplete inline](docs/INLINE.md)
 para opções de cor, hooks ZLE, segurança, limites e exemplos.
 
+## 📱 Abrir o popup no iPhone
+
+`eita inline --left 'git com'` **não é um popup**. Ele apenas retorna o
+sufixo `mit` que o ZLE pode mostrar como ghost text depois de `eita-inline-on`.
+
+Para **abrir o menu real do Ratatui** diretamente no terminal HostZera:
+
+~~~bash
+"$HOME/.local/bin/eita" popup --line 'git com'
+~~~
+
+Ou, com plugin Zsh carregado:
+
+~~~zsh
+eita-popup 'git com'
+eita-keys
+~~~
+
+Com uma linha sendo editada no Zsh, pressione **Ctrl+X, depois Ctrl+P**
+ou **Ctrl+Espaço**, se o aplicativo transmitir essa combinação.
+Dentro do seletor: ↑/↓ para escolher, Enter para aplicar e Esc para sair.
+
+O popup é **acionado sob demanda**. A ativação `eita-inline-on` mostra
+sugestões visuais no prompt, mas não abre um Ratatui modal a cada tecla.
+A viewport é compacta (8 linhas, ajustável via `--height 6..12`) para
+funcionar melhor com teclado virtual.
+
+### Debian sem GLIBC 2.39
+
+A partir deste bloco, o target Linux x64 distribuído passa a ser
+`x86_64-unknown-linux-musl`, com binário estático. O build gerado no Ubuntu
+24.04 dependia de símbolos de GLIBC indisponíveis no seu Debian.
+O instalador verifica se `eita --version` inicia antes de declarar sucesso.
+Ao instalar uma prerelease, baixe o `install.sh` da mesma branch do PR,
+porque o instalador antigo da main ainda seleciona o binário GNU.
+
 ## Desenvolvimento
 
 ~~~sh

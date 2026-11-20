@@ -43,7 +43,7 @@ jobs:
       matrix:
         include:
           - os: ubuntu-24.04
-            target: x86_64-unknown-linux-gnu
+            target: x86_64-unknown-linux-musl
           #- os: ubuntu-24.04-arm
          #   target: aarch64-unknown-linux-gnu
          # - os: macos-15-intel
@@ -59,6 +59,11 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           key: ${{ matrix.target }}
+      - name: Install musl toolchain for portable Linux binaries
+        if: contains(matrix.target, 'linux-musl')
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq musl-tools
       - name: Compile optimized binary
         env:
           TARGET: ${{ matrix.target }}
@@ -71,6 +76,11 @@ jobs:
           set -euo pipefail
           binary="target/$TARGET/release/eita"
           "$binary" --version
+          if [[ "$TARGET" == *linux-musl ]]; then
+            ! readelf -l "$binary" | grep -q 'INTERP'
+            file "$binary"
+          fi
+          "$binary" popup --help | grep -F -- '--height'
           "$binary" suggest --line 'git com' --format lines | grep -F 'git commit'
           "$binary" bench --iterations 10
       - name: Package binary, plugin and checksums
@@ -247,7 +257,7 @@ jobs:
             const marker = '<!-- eita-pr-preview -->';
             const shortUrl = 'https://shell.migos.club/install/eita/pr/' + pr;
             const assetUrl = 'https://github.com/' + owner + '/' + repo
-              + '/releases/download/' + tag + '/eita-x86_64-unknown-linux-gnu.tar.gz';
+              + '/releases/download/' + tag + '/eita-x86_64-unknown-linux-musl.tar.gz';
             const lines = [
               marker, '## 🦀 Eita · preview instalável', '',
               '✅ Commit: ' + sha.slice(0, 12), '',

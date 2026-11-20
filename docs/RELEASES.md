@@ -80,3 +80,17 @@ Os arquivos comuns do GitHub Actions continuam disponíveis durante o período d
 - A publicação exige um arquivo SHA-256 válido para cada tarball dos targets efetivamente habilitados.
 - O instalador não depende de Rust, gh CLI, jq ou sudo.
 - A interface interativa depende de Zsh e terminal compatível; o binário CLI pode ser chamado diretamente.
+
+
+## 🛠️ Build Linux portátil para Debian
+
+O arquivo Linux x64 agora usa o target `x86_64-unknown-linux-musl`.
+A pipeline instala `musl-tools` e compila com Rust para Musl,
+eliminando a dependência da GLIBC do sistema.
+O smoke test verifica a ausência do segmento `INTERP` no ELF
+e executa o binário no runner.
+
+O instalador Linux escolhe o archive Musl e deve encerrar com erro
+se a execução de `eita --version` falhar. Prévia do PR:
+execute o instalador da branch que contém essa mudança, não o
+`install.sh` ainda antigo na `main`.

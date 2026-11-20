@@ -99,3 +99,24 @@ interpretadas conjuntamente. Não comparar pontuações brutas entre motores.
 - O ranking é explicitamente opt-in e limita o que é persistido.
 - O preview pode ser revertido com `eita-inline-off` e `eita-usage-off`.
 - Todos os comandos de diagnóstico funcionam mesmo sem o modo inline ativo.
+
+
+## 📱 Popup real versus texto fantasma
+
+O comando `eita inline --left "git com"` só retorna `mit`; não abre
+uma interface. Para abrir o seletor Ratatui no terminal iOS:
+
+~~~sh
+eita popup --line "git com"
+~~~
+
+Ou use `eita-popup "git com"` após `source` do plugin no Zsh.
+Pressione Ctrl+X e depois Ctrl+P dentro do prompt para abrir o
+seletor sobre a linha atual. As teclas de navegação do popup são
+setas, Enter e Esc. O menu possui modo compacto com `--height 8`.
+
+O modo inline e o seletor interativo são **experiências distintas**:
+`eita-inline-on` não abre o popup a cada tecla. Um popup que siga
+automaticamente o cursor precisa de uma integração com controle
+coordenado da TUI e do ZLE; iniciar Ratatui a cada tecla bloquearia
+a própria edição da linha.

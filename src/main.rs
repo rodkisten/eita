@@ -45,7 +45,8 @@ enum Commands {
         #[arg(long, value_enum, default_value_t = Format::Json)]
         format: Format,
     },
-    /// Abre o seletor e grava a substituicao e a posicao do cursor.
+    /// Abre o seletor Ratatui (também acessível como 'popup').
+    #[command(alias = "popup")]
     Pick {
         #[arg(long, conflicts_with = "left")]
         line: Option<String>,
@@ -58,6 +59,9 @@ enum Commands {
         /// Cursor em caracteres Unicode, nao bytes.
         #[arg(long, requires = "output")]
         cursor_output: Option<PathBuf>,
+        /// Altura compacta para terminais móveis (6 a 12 linhas).
+        #[arg(long, default_value_t = 8, value_parser = clap::value_parser!(u16).range(6..=12))]
+        height: u16,
     },
     /// Indexa definições literais das completions nativas do Zsh sem executá-las.
     Index {
@@ -168,9 +172,10 @@ fn main() -> Result<(), Box<dyn Error>> {
             right,
             output,
             cursor_output,
+            height,
         } => {
             let context = context(line, left, right);
-            if let Some(applied) = ui::pick(&catalog, &context, &usage)? {
+            if let Some(applied) = ui::pick(&catalog, &context, &usage, height)? {
                 if let Some(path) = output {
                     fs::write(path, applied.replacement.as_bytes())?;
                     if let Some(cursor_path) = cursor_output {
