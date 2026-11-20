@@ -1,9 +1,10 @@
+use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use std::env;
 use std::fs;
 use std::path::PathBuf;
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct Candidate {
     pub value: String,
     pub description: String,
@@ -151,6 +152,16 @@ pub fn load_catalog() -> Vec<Candidate> {
         }
     }
 
+    // Cached static Zsh definitions are data, never executed as shell code.
+    for completion in crate::completion::load() {
+        insert(
+            &mut catalog,
+            &mut seen,
+            &completion.value,
+            &completion.description,
+            &completion.source,
+        );
+    }
     catalog
 }
 

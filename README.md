@@ -2,7 +2,7 @@
 
 Autocomplete contextual para Zsh, escrito em Rust. Combina [Frizbee](https://github.com/saghen/frizbee), com tolerância a erros de digitação, e [Ratatui](https://ratatui.rs/), para uma interface compacta no terminal.
 
-> **Seletor opt-in:** sugestões acionadas por atalho, sem substituir completions nativas e sem executar automaticamente o comando selecionado.
+> **Seletor opt-in:** sugestões acionadas por atalho, sem substituir completions nativas nem executar automaticamente o comando escolhido.
 
 ## ⚡ Instalação pelo GitHub Release
 
@@ -41,6 +41,31 @@ curl -fsSL https://raw.githubusercontent.com/rodkisten/eita/main/install.sh | EI
 Para mais detalhes sobre os artefatos, confira [Builds e Releases](docs/RELEASES.md).
 
 
+### 🔗 Links curtos e previews de pull requests
+
+O [Shell Workbench](https://shell.migos.club) oferece um instalador permanente, sem precisar copiar URLs do GitHub:
+
+~~~sh
+curl -fsSL https://shell.migos.club/install/eita | sh
+~~~
+
+O build de um PR pode ser instalado usando o número do PR, e o endereço não muda quando novos commits são enviados:
+
+~~~sh
+curl -fsSL https://shell.migos.club/install/eita/pr/2 | sh
+~~~
+
+Você também pode baixar o arquivo diretamente, sem executar o instalador:
+
+~~~sh
+curl -fL https://shell.migos.club/install/eita/pr/3/artifact -o eita-pr-3.tar.gz
+curl -fL https://shell.migos.club/install/eita/pr/3/checksum -o eita-pr-3.tar.gz.sha256
+~~~
+
+O link do arquivo binário e o link curto são publicados automaticamente em um comentário atualizado do PR quando a compilação e a verificação dos checksums terminam. Os previews são **prereleases** `pr-<número>` e não alteram o `latest` da main. Previews são removidos quando o PR é fechado. A publicação exige um PR interno ao repositório e a permissão `contents: write` do GitHub Actions.
+
+**Nota:** os links curtos dependem também da rota `/install/eita/*` publicada no repositório `rodkisten/shell`. Antes dos merges correspondentes, use o instalador via `raw.githubusercontent.com`.
+
 ## Compilar a partir do código-fonte
 
 Requer Rust 1.89+ e Zsh.
@@ -58,13 +83,9 @@ O binário precisa estar no seu `PATH` antes de carregar o plugin. Para iniciar 
 bindkey '^X^P' eita-pick
 ~~~
 
-Cancelar com Esc preserva a linha de comando. Tab ou Enter preenchem o buffer **sem executá-lo**. O plugin também aceita **Ctrl+X Ctrl+P** como atalho alternativo.
+Cancelar com Esc preserva a linha de comando. Tab ou Enter apenas preenchem o buffer, sem executá-lo. `Ctrl+X Ctrl+P` funciona como atalho alternativo.
 
-### Conclusão sensível ao cursor
-
-O widget envia `LBUFFER` e `RBUFFER` ao binário. O Eita analisa apenas o segmento ativo entre comandos (`;`, `&&`, `|`, nova linha), preserva os comandos anteriores e o texto à direita do cursor. Quando o cursor está dentro de uma palavra, substitui também o sufixo dessa palavra. Se há aspas ou escape incompletos, não altera o comando. Há testes isolados para pipes, escapes, Unicode e edição no meio do buffer.
-
-Aliases do Zsh são lidos diretamente da variável associativa `aliases` e transferidos por um TSV temporário. Nenhum comando ou expansão de alias é executado. A integração continua opt-in e não interfere no `compinit`.
+O widget passa `LBUFFER` e `RBUFFER` ao Eita para completar o segmento atual sem apagar comandos anteriores nem o texto à direita do cursor. Ele também fornece aliases do Zsh como dados, sem executá-los.
 
 ## CLI
 
@@ -72,20 +93,40 @@ Aliases do Zsh são lidos diretamente da variável associativa `aliases` e trans
 eita suggest --line 'git comit --am'
 eita suggest --line 'got' --format lines
 eita pick --line 'git com'
-# Preserve o texto apos o cursor:
-eita suggest --left 'echo olá | git com' --right 'it --amend' --format json
-# Passe aliases do shell por um arquivo TSV, se desejar:
-EITA_ALIASES_FILE=~/.config/eita/aliases.tsv eita suggest --line 'gco'
+eita suggest --left 'echo ok | git com' --right 'it --amend' --format json
 eita bench --iterations 1000
 ~~~
 
-`suggest` imprime JSON com `value`, `description`, `source`, `score`, `replacement` (buffer resultante) e `cursor` (posição em caracteres). `pick` aceita `--output /caminho` para escrever a seleção em um arquivo, usado pelo plugin ZLE.
+`suggest` imprime JSON com `value`, `description`, `source`, `score`, `replacement` e `cursor`. `pick` aceita `--output /caminho` para escrever a seleção em um arquivo, usado pelo plugin ZLE.
 
 ## Fontes do catálogo
 
 O Eita reúne comandos internos, executáveis no `PATH` e comandos personalizados em `~/.config/eita/specs.tsv`. Defina `EITA_SPECS` para ler outro arquivo. Cada linha tem um comando, um TAB literal e uma descrição. Veja [o exemplo](examples/specs.tsv).
 
 A descoberta no `PATH` consulta arquivos executáveis e **não executa nenhum programa**.
+
+## 🧠 Indexação das completions nativas do Zsh
+
+O Eita pode **ler as definições de completion presentes no seu próprio `fpath`**, extrair flags e subcomandos descritos literalmente em `_arguments` e em listas `commands=(...)`, e armazenar um índice local em JSON.
+
+Depois de carregar o plugin Zsh, execute:
+
+~~~zsh
+eita-index
+# Alternativa: Ctrl+X Ctrl+I no prompt interativo
+~~~
+
+Para conferir o cache e forçar uma nova indexação:
+
+~~~sh
+eita index --status
+eita index --refresh --fpath /usr/share/zsh/functions/Completion
+eita suggest --line "git --ver"
+~~~
+
+O caminho padrão é `~/.cache/eita/zsh-completions.json` (ou `$XDG_CACHE_HOME/eita/zsh-completions.json`), personalizável com `EITA_COMPLETION_CACHE`. A indexação é **explícita**, para não aumentar a latência do autocomplete a cada tecla. O comando `suggest` carrega o cache automaticamente.
+
+Por segurança, o indexador apenas lê arquivos locais, aplica limites de tamanho, extrai **literais simples** e não executa funções Zsh, aliases, comandos externos, `eval` ou `--help`. As completions dinâmicas, funções aninhadas e especificações muito complexas continuam sendo responsabilidade do sistema nativo de completions do Zsh. Esse recurso é um enriquecimento progressivo, não um substituto para `compinit`.
 
 ## Desenvolvimento
 
@@ -105,10 +146,10 @@ O subcomando `bench` mede somente o matcher após a construção do catálogo; n
 - [x] Seletor Ratatui inline, navegação e cancelamento
 - [x] Plugin ZLE opt-in
 - [x] CI, smoke tests e benchmark local
-- [x] Parsing conservador de cursor, aspas, pipes e argumentos, com preservação de sufixos
-- [x] Aliases Zsh como candidatos (sem executar expansões)
-- [ ] Indexação e parsing de completions nativas Zsh
-- [ ] Texto fantasma, menus no próprio prompt e cache persistente
+- [x] Parsing conservador de cursor, aspas, pipes e argumentos
+- [x] Aliases Zsh
+- [x] Indexação estática e cache das definições nativas de completion do Zsh
+- [ ] Texto fantasma e menus no próprio prompt
 - [ ] Ranking contextual por histórico, opt-in
 - [ ] Benchmark reproduzível de Frizbee, Nucleo e FZF
 

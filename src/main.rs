@@ -1,4 +1,5 @@
 mod catalog;
+mod completion;
 mod context;
 mod engine;
 mod ui;
@@ -53,6 +54,21 @@ enum Commands {
         /// Cursor em caracteres Unicode, nao bytes.
         #[arg(long, requires = "output")]
         cursor_output: Option<PathBuf>,
+    },
+    /// Indexa definições literais das completions nativas do Zsh sem executá-las.
+    Index {
+        /// Força a reconstrução do índice (padrão quando não usa --status).
+        #[arg(long)]
+        refresh: bool,
+        /// Lista de diretórios do fpath separada por dois-pontos.
+        #[arg(long)]
+        fpath: Option<String>,
+        /// Substitui o caminho do cache usado nesta operação.
+        #[arg(long)]
+        cache: Option<PathBuf>,
+        /// Exibe estatísticas do cache sem reconstruir o índice.
+        #[arg(long, conflicts_with = "refresh")]
+        status: bool,
     },
     /// Mede a busca apos carregar o catalogo.
     Bench {
@@ -133,6 +149,20 @@ fn main() -> Result<(), Box<dyn Error>> {
                     println!("{}", applied.replacement);
                 }
             }
+        }
+        Commands::Index {
+            refresh: _,
+            fpath,
+            cache,
+            status,
+        } => {
+            let destination = cache.unwrap_or_else(completion::cache_path);
+            let report = if status {
+                completion::status(&destination)?
+            } else {
+                completion::rebuild(fpath.as_deref(), &destination)?
+            };
+            println!("{}", serde_json::to_string_pretty(&report)?);
         }
         Commands::Bench { iterations } => {
             if iterations == 0 {

@@ -55,6 +55,10 @@ jobs:
           ./target/release/eita suggest --left "git 'com" --format json | grep -F '[]'
           printf 'gco\tAlias: git checkout\n' > "$RUNNER_TEMP/eita-aliases.tsv"
           EITA_ALIASES_FILE="$RUNNER_TEMP/eita-aliases.tsv" ./target/release/eita suggest --line 'gco' --format lines | grep -x 'gco'
+          ./target/release/eita index --refresh --fpath "$GITHUB_WORKSPACE/tests/fixtures" --cache "$RUNNER_TEMP/eita-index.json" | grep -F '"candidates"'
+          ./target/release/eita index --status --cache "$RUNNER_TEMP/eita-index.json" | grep -F '"scanned_files": 1'
+          EITA_COMPLETION_CACHE="$RUNNER_TEMP/eita-index.json" ./target/release/eita suggest --line 'orbit --ver' --format lines | grep -x 'orbit --verbose'
+          EITA_COMPLETION_CACHE="$RUNNER_TEMP/eita-index.json" ./target/release/eita suggest --line 'orbit dep' --format lines | grep -x 'orbit deploy'
           ./target/release/eita bench --iterations 50
       - name: Check installer syntax
         run: sh -n install.sh

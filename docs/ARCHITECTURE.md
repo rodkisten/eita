@@ -2,18 +2,17 @@
 
 ## Componentes
 
-1. **Adaptador ZLE**: widget opt-in que lê `LBUFFER` e `RBUFFER`, consulta aliases nativos e envia buffers ao seletor. A resposta contém texto completo e posição de `CURSOR` em caracteres, sem executar sugestões.
-2. **CLI**: `suggest --left --right` (ou `--line`), `pick --left --right --output --cursor-output` e `bench`.
+1. **Adaptador ZLE**: widget opt-in que lê `BUFFER`, entrega a linha ao seletor e reposiciona `CURSOR` na escolha. Não executa sugestões.
+2. **CLI**: comandos `suggest`, `pick` e `bench`.
 3. **Catálogo**: lista interna, comandos encontrados no PATH sem execução e TSV do usuário.
-4. **Context**: parser conservador de segmentos Zsh (`;`, `|`, `&` e newline), com estado de aspas/escapes; preserva comandos anteriores e a parte à direita do cursor. A engine identifica raiz do comando, restringe candidatos à família quando possível, usa Frizbee e ajusta ranking de prefixos e matches exatos.
+4. **Engine**: identifica o primeiro token, restringe candidatos à família do comando quando possível, usa Frizbee e ajusta ranking para prefixo e matches exatos.
 5. **TUI**: Ratatui + Crossterm com viewport inline de 10 linhas.
 
 ## Segurança e limites
 
 - Sugestões são apenas texto; nada é executado automaticamente.
 - O plugin não intercepta cada tecla nem substitui `compinit`.
-- O seletor aplica a substituição ao segmento sob o cursor, preservando os demais segmentos do buffer e reconstruindo a posição de cursor em caracteres. Strings com aspas não fechadas e escapes pendentes não são editadas.
-- O parser é conservador e **ainda não interpreta completamente** substituições complexas de comando, here-docs, redirecionamentos e expansões aninhadas; essas situações exigirão um lexer mais completo antes de sugestões automáticas.
+- O seletor atualmente altera o `BUFFER` inteiro. A preservação do trecho à direita do cursor é uma melhoria obrigatória antes de ativar sugestões automáticas.
 - Descrições de man pages e completions reais ainda não são coletadas.
 - `bench` não inclui startup, coleta do PATH, I/O do ZLE e renderização.
 
@@ -21,7 +20,7 @@
 
 ### P1: contexto do cursor
 
-Primeira versão concluída para segmentos simples, aspas, pipes, escapes e posição do cursor. Próximo passo: lexer completo para expansões, redirecionamentos, heredocs e cursor em qualquer contexto aninhado.
+Lexer shell-aware que identifica tokens, aspas, pipes, escapes e a palavra atual. Preservar o sufixo do buffer e completar só o intervalo de edição.
 
 ### P2: fontes de conhecimento
 
@@ -37,4 +36,17 @@ Datasets congelados, cold/warm start, p50/p95/p99, memória e qualidade do ranki
 
 ## Distribuição
 
-A pipeline [Build & Release](../.github/workflows/release.yml) valida fontes, compila quatro targets nativos, cria archives com SHA-256, anexa artefatos ao workflow e publica GitHub Release por SHA de commit na `main`. O instalador [install.sh](../install.sh) seleciona a arquitetura e exige verificação de checksum. Consulte [docs/RELEASES.md](RELEASES.md).
+A pipeline [Build & Release](../.github/workflows/release.yml) valida fontes, compila os targets habilitados na matriz, cria archives com SHA-256, anexa artefatos ao workflow e publica GitHub Release por SHA de commit na `main`. O instalador [install.sh](../install.sh) seleciona a arquitetura e exige verificação de checksum. Consulte [docs/RELEASES.md](RELEASES.md).
+
+## Edição contextual ZLE
+
+O `Context` reconhece separadores de comandos fora de aspas e substitui o segmento do comando ativo, preservando texto posterior ao cursor. O widget recebe `LBUFFER` e `RBUFFER`, e o binário devolve `replacement` e `cursor` para que não seja necessário executar nem avaliar nenhum comando sugerido. Expressões complexas não são reescritas enquanto tiverem aspas incompletas.
+
+
+## Índice estático das completions do Zsh
+
+`src/completion.rs` lê caminhos de `EITA_FPATH` (ou `FPATH`) e considera arquivos cujo nome começa com `_`. A diretiva `#compdef` fornece nomes de comandos; na ausência dela, usa-se o nome do arquivo. O parser extrai somente argumentos literais de `_arguments` e listas simples de subcomandos, sem avaliar funções. Limites de tamanho e quantidade evitam indexação sem fronteiras.
+
+`eita index --refresh` atualiza um único JSON em `XDG_CACHE_HOME`, usando escrita temporária e rename; `eita index --status` exibe métricas sem reconstruir. O loader só lê versões compatíveis e falha silenciosamente para caches ausentes ou inválidos, deixando os comandos embutidos e os executáveis do PATH disponíveis normalmente.
+
+A indexação é opt-in para preservar a velocidade do shell: o widget `eita-index` fornece o `fpath` da sessão e pode ser chamado a qualquer momento. O índice não interpreta scripts, não executa `--help` e pode ignorar specs dinâmicas; a compatibilidade completa com `compinit` permanece um trabalho separado.

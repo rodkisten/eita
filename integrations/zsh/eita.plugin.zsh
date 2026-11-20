@@ -45,3 +45,21 @@ zle -N eita-pick _eita_pick_widget
 # Ctrl+Space can be intercepted by the terminal; Ctrl+X Ctrl+P is a fallback.
 bindkey '^@' eita-pick
 bindkey '^X^P' eita-pick
+
+
+# Build an offline cache of literal option and subcommand specifications from fpath.
+# Compinit, shell functions and completion definitions are never evaluated by Eita.
+eita-index() {
+  emulate -L zsh
+  local -x EITA_FPATH="${(j.:.)fpath}"
+  command eita index --refresh "$@"
+}
+
+_eita_index_widget() {
+  emulate -L zsh
+  zle -I
+  eita-index </dev/tty >/dev/tty
+  zle redisplay
+}
+zle -N eita-reindex _eita_index_widget
+bindkey '^X^I' eita-reindex

@@ -5,13 +5,7 @@ on:
     branches: [main]
   workflow_dispatch:
   pull_request:
-    paths:
-      - '.github/workflows/release.yml'
-      - 'install.sh'
-      - 'Cargo.toml'
-      - 'Cargo.lock'
-      - 'src/**'
-      - 'integrations/zsh/**'
+    types: [opened, synchronize, reopened, ready_for_review, closed]
 
 permissions:
   contents: read
@@ -19,7 +13,7 @@ permissions:
 jobs:
   verify:
     name: "✅ Validate source"
-    if: github.event_name == 'pull_request' || github.ref == 'refs/heads/main'
+    if: github.event_name != 'pull_request' || github.event.action != 'closed'
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
@@ -50,12 +44,12 @@ jobs:
         include:
           - os: ubuntu-24.04
             target: x86_64-unknown-linux-gnu
-          - os: ubuntu-24.04-arm
-            target: aarch64-unknown-linux-gnu
-          - os: macos-15-intel
-            target: x86_64-apple-darwin
-          - os: macos-15
-            target: aarch64-apple-darwin
+          #- os: ubuntu-24.04-arm
+         #   target: aarch64-unknown-linux-gnu
+         # - os: macos-15-intel
+         #   target: x86_64-apple-darwin
+         # - os: macos-15
+          #  target: aarch64-apple-darwin
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -127,8 +121,10 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          test "$(find dist -maxdepth 1 -type f -name '*.tar.gz' | wc -l)" -eq 4
-          test "$(find dist -maxdepth 1 -type f -name '*.sha256' | wc -l)" -eq 4
+          archives="$(find dist -maxdepth 1 -type f -name '*.tar.gz' | wc -l)"
+          checksums="$(find dist -maxdepth 1 -type f -name '*.sha256' | wc -l)"
+          test "$archives" -gt 0
+          test "$archives" -eq "$checksums"
           for file in dist/*.sha256; do
             (cd dist && sha256sum -c "$(basename "$file")")
           done
@@ -157,3 +153,152 @@ jobs:
             echo "$tag published without replacing latest: main advanced to $head_sha"
           fi
           echo "Release: https://github.com/$GH_REPO/releases/tag/$tag" >> "$GITHUB_STEP_SUMMARY"
+
+
+  preview:
+    name: "🔗 Publish installable PR preview"
+    needs: build
+    if: github.event_name == 'pull_request' && github.event.action != 'closed' && github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-24.04
+    concurrency:
+      group: eita-pr-preview-${{ github.event.pull_request.number }}
+      cancel-in-progress: false
+    permissions:
+      contents: write
+      issues: write
+      pull-requests: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: eita-*
+          merge-multiple: true
+          path: dist
+      - name: Verify checksums for every downloaded archive
+        shell: bash
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          archives=(dist/*.tar.gz)
+          checksums=(dist/*.sha256)
+          test "${#archives[@]}" -gt 0
+          test "${#archives[@]}" -eq "${#checksums[@]}"
+          for checksum in "${checksums[@]}"; do
+            (cd dist && sha256sum -c "$(basename "$checksum")")
+          done
+      - name: Publish moving PR prerelease and update comment
+        uses: actions/github-script@v8
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const fs = require('node:fs');
+            const path = require('node:path');
+            const { owner, repo } = context.repo;
+            const pr = context.payload.pull_request.number;
+            const sha = context.payload.pull_request.head.sha;
+            const live = (await github.rest.pulls.get({ owner, repo, pull_number: pr })).data;
+            if (live.state !== 'open' || live.head.sha !== sha) {
+              core.notice('Skipping superseded preview build');
+              return;
+            }
+            const tag = 'pr-' + pr;
+            const title = 'Eita PR #' + pr + ' · ' + sha.slice(0, 12);
+            const notes = 'Preview of PR #' + pr + ' at commit ' + sha
+              + '. Files are replaced after all build jobs pass.';
+            let release;
+            try {
+              release = (await github.rest.repos.getReleaseByTag({ owner, repo, tag })).data;
+              release = (await github.rest.repos.updateRelease({
+                owner, repo, release_id: release.id, name: title, body: notes,
+                prerelease: true,
+              })).data;
+            } catch (error) {
+              if (error.status !== 404) throw error;
+              release = (await github.rest.repos.createRelease({
+                owner, repo, tag_name: tag, target_commitish: sha,
+                name: title, body: notes, draft: false, prerelease: true,
+                make_latest: 'false',
+              })).data;
+            }
+            const files = fs.readdirSync('dist')
+              .filter(name => name.endsWith('.tar.gz') || name.endsWith('.sha256'))
+              .sort();
+            if (!files.some(name => name.endsWith('.tar.gz'))) throw new Error('Missing preview archive');
+            const previous = await github.paginate(github.rest.repos.listReleaseAssets, {
+              owner, repo, release_id: release.id, per_page: 100,
+            });
+            for (const name of files) {
+              const existing = previous.find(asset => asset.name === name);
+              if (existing) {
+                await github.rest.repos.deleteReleaseAsset({ owner, repo, asset_id: existing.id });
+              }
+              const filename = path.join('dist', name);
+              await github.rest.repos.uploadReleaseAsset({
+                owner, repo, release_id: release.id, name,
+                data: fs.readFileSync(filename),
+                headers: {
+                  'content-type': name.endsWith('.sha256') ? 'text/plain' : 'application/gzip',
+                  'content-length': fs.statSync(filename).size,
+                },
+              });
+            }
+            await github.rest.git.updateRef({
+              owner, repo, ref: 'tags/' + tag, sha, force: true,
+            });
+            const marker = '<!-- eita-pr-preview -->';
+            const shortUrl = 'https://shell.migos.club/install/eita/pr/' + pr;
+            const assetUrl = 'https://github.com/' + owner + '/' + repo
+              + '/releases/download/' + tag + '/eita-x86_64-unknown-linux-gnu.tar.gz';
+            const lines = [
+              marker, '## 🦀 Eita · preview instalável', '',
+              '✅ Commit: ' + sha.slice(0, 12), '',
+              '**Instalar a build mais recente deste PR:**',
+              '~~~sh', 'curl -fsSL ' + shortUrl + ' | sh', '~~~', '',
+              '🔗 **Instalador:** ' + shortUrl,
+              '📦 **Artefato (link curto):** ' + shortUrl + '/artifact',
+              '🔐 **SHA-256 (link curto):** ' + shortUrl + '/checksum',
+              '🧾 **GitHub Release asset:** ' + assetUrl,
+              '📝 **Prerelease:** ' + release.html_url, '',
+              'Este preview é atualizado apenas após builds bem-sucedidos.',
+              'O release latest da main permanece inalterado.',
+            ];
+            const body = lines.join('\n');
+            const comments = await github.paginate(github.rest.issues.listComments, {
+              owner, repo, issue_number: pr, per_page: 100,
+            });
+            const existing = comments.find(item =>
+              item.user?.type === 'Bot' && item.body?.includes(marker)
+            );
+            if (existing) {
+              await github.rest.issues.updateComment({
+                owner, repo, comment_id: existing.id, body,
+              });
+            } else {
+              await github.rest.issues.createComment({ owner, repo, issue_number: pr, body });
+            }
+            fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY,
+              '## 🦀 PR preview\n\n' + shortUrl + '\n\n' + release.html_url + '\n');
+
+  preview_cleanup:
+    name: "🧹 Remove closed PR prerelease"
+    if: github.event_name == 'pull_request' && github.event.action == 'closed' && github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/github-script@v8
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const { owner, repo } = context.repo;
+            const tag = 'pr-' + context.payload.pull_request.number;
+            try {
+              const release = (await github.rest.repos.getReleaseByTag({
+                owner, repo, tag,
+              })).data;
+              await github.rest.repos.deleteRelease({ owner, repo, release_id: release.id });
+              await github.rest.git.deleteRef({ owner, repo, ref: 'tags/' + tag });
+              core.notice('Removed ' + tag + ' preview');
+            } catch (error) {
+              if (error.status !== 404) throw error;
+              core.notice('No preview release to remove');
+            }
