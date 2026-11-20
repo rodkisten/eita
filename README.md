@@ -2,7 +2,7 @@
 
 Autocomplete contextual para Zsh, escrito em Rust. Combina [Frizbee](https://github.com/saghen/frizbee), com tolerância a erros de digitação, e [Ratatui](https://ratatui.rs/), para uma interface compacta no terminal.
 
-> **Protótipo inicial:** sugestões acionadas pelo usuário, sem substituir o sistema nativo de completions do Zsh e sem executar o comando sugerido.
+> **Seletor opt-in:** sugestões acionadas por atalho, sem substituir completions nativas e sem executar automaticamente o comando selecionado.
 
 ## ⚡ Instalação pelo GitHub Release
 
@@ -58,7 +58,13 @@ O binário precisa estar no seu `PATH` antes de carregar o plugin. Para iniciar 
 bindkey '^X^P' eita-pick
 ~~~
 
-Cancelar com Esc preserva a linha de comando. Tab ou Enter apenas preenchem o buffer, sem executá-lo.
+Cancelar com Esc preserva a linha de comando. Tab ou Enter preenchem o buffer **sem executá-lo**. O plugin também aceita **Ctrl+X Ctrl+P** como atalho alternativo.
+
+### Conclusão sensível ao cursor
+
+O widget envia `LBUFFER` e `RBUFFER` ao binário. O Eita analisa apenas o segmento ativo entre comandos (`;`, `&&`, `|`, nova linha), preserva os comandos anteriores e o texto à direita do cursor. Quando o cursor está dentro de uma palavra, substitui também o sufixo dessa palavra. Se há aspas ou escape incompletos, não altera o comando. Há testes isolados para pipes, escapes, Unicode e edição no meio do buffer.
+
+Aliases do Zsh são lidos diretamente da variável associativa `aliases` e transferidos por um TSV temporário. Nenhum comando ou expansão de alias é executado. A integração continua opt-in e não interfere no `compinit`.
 
 ## CLI
 
@@ -66,10 +72,14 @@ Cancelar com Esc preserva a linha de comando. Tab ou Enter apenas preenchem o bu
 eita suggest --line 'git comit --am'
 eita suggest --line 'got' --format lines
 eita pick --line 'git com'
+# Preserve o texto apos o cursor:
+eita suggest --left 'echo olá | git com' --right 'it --amend' --format json
+# Passe aliases do shell por um arquivo TSV, se desejar:
+EITA_ALIASES_FILE=~/.config/eita/aliases.tsv eita suggest --line 'gco'
 eita bench --iterations 1000
 ~~~
 
-`suggest` imprime JSON com `value`, `description`, `source` e `score`. `pick` aceita `--output /caminho` para escrever a seleção em um arquivo, usado pelo plugin ZLE.
+`suggest` imprime JSON com `value`, `description`, `source`, `score`, `replacement` (buffer resultante) e `cursor` (posição em caracteres). `pick` aceita `--output /caminho` para escrever a seleção em um arquivo, usado pelo plugin ZLE.
 
 ## Fontes do catálogo
 
@@ -95,8 +105,9 @@ O subcomando `bench` mede somente o matcher após a construção do catálogo; n
 - [x] Seletor Ratatui inline, navegação e cancelamento
 - [x] Plugin ZLE opt-in
 - [x] CI, smoke tests e benchmark local
-- [ ] Parsing de cursor, aspas, pipes e argumentos
-- [ ] Completions nativas e aliases Zsh
+- [x] Parsing conservador de cursor, aspas, pipes e argumentos, com preservação de sufixos
+- [x] Aliases Zsh como candidatos (sem executar expansões)
+- [ ] Indexação e parsing de completions nativas Zsh
 - [ ] Texto fantasma, menus no próprio prompt e cache persistente
 - [ ] Ranking contextual por histórico, opt-in
 - [ ] Benchmark reproduzível de Frizbee, Nucleo e FZF

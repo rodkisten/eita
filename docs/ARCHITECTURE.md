@@ -2,17 +2,18 @@
 
 ## Componentes
 
-1. **Adaptador ZLE**: widget opt-in que lê `BUFFER`, entrega a linha ao seletor e reposiciona `CURSOR` na escolha. Não executa sugestões.
-2. **CLI**: comandos `suggest`, `pick` e `bench`.
+1. **Adaptador ZLE**: widget opt-in que lê `LBUFFER` e `RBUFFER`, consulta aliases nativos e envia buffers ao seletor. A resposta contém texto completo e posição de `CURSOR` em caracteres, sem executar sugestões.
+2. **CLI**: `suggest --left --right` (ou `--line`), `pick --left --right --output --cursor-output` e `bench`.
 3. **Catálogo**: lista interna, comandos encontrados no PATH sem execução e TSV do usuário.
-4. **Engine**: identifica o primeiro token, restringe candidatos à família do comando quando possível, usa Frizbee e ajusta ranking para prefixo e matches exatos.
+4. **Context**: parser conservador de segmentos Zsh (`;`, `|`, `&` e newline), com estado de aspas/escapes; preserva comandos anteriores e a parte à direita do cursor. A engine identifica raiz do comando, restringe candidatos à família quando possível, usa Frizbee e ajusta ranking de prefixos e matches exatos.
 5. **TUI**: Ratatui + Crossterm com viewport inline de 10 linhas.
 
 ## Segurança e limites
 
 - Sugestões são apenas texto; nada é executado automaticamente.
 - O plugin não intercepta cada tecla nem substitui `compinit`.
-- O seletor atualmente altera o `BUFFER` inteiro. A preservação do trecho à direita do cursor é uma melhoria obrigatória antes de ativar sugestões automáticas.
+- O seletor aplica a substituição ao segmento sob o cursor, preservando os demais segmentos do buffer e reconstruindo a posição de cursor em caracteres. Strings com aspas não fechadas e escapes pendentes não são editadas.
+- O parser é conservador e **ainda não interpreta completamente** substituições complexas de comando, here-docs, redirecionamentos e expansões aninhadas; essas situações exigirão um lexer mais completo antes de sugestões automáticas.
 - Descrições de man pages e completions reais ainda não são coletadas.
 - `bench` não inclui startup, coleta do PATH, I/O do ZLE e renderização.
 
@@ -20,7 +21,7 @@
 
 ### P1: contexto do cursor
 
-Lexer shell-aware que identifica tokens, aspas, pipes, escapes e a palavra atual. Preservar o sufixo do buffer e completar só o intervalo de edição.
+Primeira versão concluída para segmentos simples, aspas, pipes, escapes e posição do cursor. Próximo passo: lexer completo para expansões, redirecionamentos, heredocs e cursor em qualquer contexto aninhado.
 
 ### P2: fontes de conhecimento
 

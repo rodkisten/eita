@@ -1,10 +1,14 @@
 mod catalog;
+mod context;
 mod engine;
 mod ui;
 
 use clap::{Parser, Subcommand, ValueEnum};
+use context::Context;
+use serde::Serialize;
 use std::error::Error;
 use std::fs;
+use std::path::PathBuf;
 use std::time::Instant;
 
 #[derive(Parser)]
@@ -22,21 +26,35 @@ struct Cli {
 enum Commands {
     /// Retorna sugestoes sem abrir interface.
     Suggest {
+        /// Linha inteira (compatibilidade com v0.1).
+        #[arg(long, conflicts_with = "left")]
+        line: Option<String>,
+        /// Texto antes do cursor (ZLE LBUFFER).
         #[arg(long)]
-        line: String,
+        left: Option<String>,
+        /// Texto depois do cursor (ZLE RBUFFER).
+        #[arg(long, default_value = "")]
+        right: String,
         #[arg(long, default_value_t = 10)]
         limit: usize,
         #[arg(long, value_enum, default_value_t = Format::Json)]
         format: Format,
     },
-    /// Abre seletor Ratatui e grava a escolha em um arquivo.
+    /// Abre o seletor e grava a substituicao e a posicao do cursor.
     Pick {
+        #[arg(long, conflicts_with = "left")]
+        line: Option<String>,
         #[arg(long)]
-        line: String,
+        left: Option<String>,
+        #[arg(long, default_value = "")]
+        right: String,
         #[arg(long)]
-        output: Option<std::path::PathBuf>,
+        output: Option<PathBuf>,
+        /// Cursor em caracteres Unicode, nao bytes.
+        #[arg(long, requires = "output")]
+        cursor_output: Option<PathBuf>,
     },
-    /// Mede o tempo de matching do catalogo ja carregado.
+    /// Mede a busca apos carregar o catalogo.
     Bench {
         #[arg(long, default_value_t = 200)]
         iterations: usize,
@@ -49,31 +67,70 @@ enum Format {
     Lines,
 }
 
+#[derive(Serialize)]
+struct ContextualSuggestion {
+    #[serde(flatten)]
+    suggestion: engine::Suggestion,
+    replacement: String,
+    cursor: usize,
+}
+
+fn context(line: Option<String>, left: Option<String>, right: String) -> Context {
+    let preceding = left.or(line).unwrap_or_default();
+    Context::new(&preceding, &right)
+}
+
 fn main() -> Result<(), Box<dyn Error>> {
     let cli = Cli::parse();
     let catalog = catalog::load_catalog();
     match cli.command {
         Commands::Suggest {
             line,
+            left,
+            right,
             limit,
             format,
         } => {
-            let suggestions = engine::suggest(&catalog, &line, limit);
+            let context = context(line, left, right);
+            let items: Vec<ContextualSuggestion> = context
+                .query()
+                .map(|query| engine::suggest(&catalog, query, limit))
+                .unwrap_or_default()
+                .into_iter()
+                .map(|suggestion| {
+                    let applied = context.apply(&suggestion.value);
+                    ContextualSuggestion {
+                        suggestion,
+                        replacement: applied.replacement,
+                        cursor: applied.cursor,
+                    }
+                })
+                .collect();
             match format {
-                Format::Json => println!("{}", serde_json::to_string_pretty(&suggestions)?),
+                Format::Json => println!("{}", serde_json::to_string_pretty(&items)?),
                 Format::Lines => {
-                    for suggestion in suggestions {
-                        println!("{}", suggestion.value);
+                    for item in items {
+                        println!("{}", item.replacement);
                     }
                 }
             }
         }
-        Commands::Pick { line, output } => {
-            if let Some(value) = ui::pick(&catalog, &line)? {
+        Commands::Pick {
+            line,
+            left,
+            right,
+            output,
+            cursor_output,
+        } => {
+            let context = context(line, left, right);
+            if let Some(applied) = ui::pick(&catalog, &context)? {
                 if let Some(path) = output {
-                    fs::write(path, value.as_bytes())?;
+                    fs::write(path, applied.replacement.as_bytes())?;
+                    if let Some(cursor_path) = cursor_output {
+                        fs::write(cursor_path, applied.cursor.to_string())?;
+                    }
                 } else {
-                    println!("{value}");
+                    println!("{}", applied.replacement);
                 }
             }
         }

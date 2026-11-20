@@ -46,9 +46,15 @@ jobs:
       - name: Build release
         run: cargo build --release
       - name: Smoke
+        shell: bash
         run: |
-          ./target/release/eita suggest --line 'git com' --format lines | grep 'git commit'
-          ./target/release/eita suggest --line 'got' --limit 1000 --format lines | grep '^git$'
+          set -euo pipefail
+          ./target/release/eita suggest --line 'git com' --format lines | grep -F 'git commit'
+          ./target/release/eita suggest --line 'got' --limit 1000 --format lines | grep -x 'git'
+          ./target/release/eita suggest --left 'echo olá | git com' --right 'it --amend' --format lines | grep -F 'echo olá | git commit --amend'
+          ./target/release/eita suggest --left "git 'com" --format json | grep -F '[]'
+          printf 'gco\tAlias: git checkout\n' > "$RUNNER_TEMP/eita-aliases.tsv"
+          EITA_ALIASES_FILE="$RUNNER_TEMP/eita-aliases.tsv" ./target/release/eita suggest --line 'gco' --format lines | grep -x 'gco'
           ./target/release/eita bench --iterations 50
       - name: Check installer syntax
         run: sh -n install.sh

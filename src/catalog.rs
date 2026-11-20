@@ -132,6 +132,25 @@ pub fn load_catalog() -> Vec<Candidate> {
             }
         }
     }
+
+    // A ZLE adapter may export a sanitized tab-delimited list of aliases.
+    // Treat aliases as data; never evaluate or execute their expansions.
+    if let Some(path) = env::var_os("EITA_ALIASES_FILE") {
+        if let Ok(contents) = fs::read_to_string(path) {
+            for line in contents.lines() {
+                if let Some((name, description)) = line.split_once('\t') {
+                    insert(
+                        &mut catalog,
+                        &mut seen,
+                        name.trim(),
+                        description.trim(),
+                        "alias",
+                    );
+                }
+            }
+        }
+    }
+
     catalog
 }
 

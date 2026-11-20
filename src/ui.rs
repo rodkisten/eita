@@ -1,4 +1,5 @@
 use crate::catalog::Candidate;
+use crate::context::{Applied, Context};
 use crate::engine::suggest;
 use crossterm::event::{self, Event, KeyCode, KeyEventKind, KeyModifiers};
 use crossterm::terminal::{disable_raw_mode, enable_raw_mode};
@@ -10,7 +11,10 @@ use ratatui::widgets::{Block, Borders, List, ListItem, ListState, Paragraph};
 use ratatui::{Terminal, TerminalOptions, Viewport};
 use std::io;
 
-pub fn pick(catalog: &[Candidate], initial: &str) -> io::Result<Option<String>> {
+pub fn pick(catalog: &[Candidate], context: &Context) -> io::Result<Option<Applied>> {
+    let Some(initial) = context.query() else {
+        return Ok(None);
+    };
     enable_raw_mode()?;
     let backend = CrosstermBackend::new(io::stdout());
     let mut terminal = match Terminal::with_options(
@@ -25,7 +29,7 @@ pub fn pick(catalog: &[Candidate], initial: &str) -> io::Result<Option<String>> 
             return Err(error);
         }
     };
-    let result = run_loop(&mut terminal, catalog, initial);
+    let result = run_loop(&mut terminal, catalog, context, initial);
     let _ = terminal.clear();
     drop(terminal);
     disable_raw_mode()?;
@@ -35,8 +39,9 @@ pub fn pick(catalog: &[Candidate], initial: &str) -> io::Result<Option<String>> 
 fn run_loop(
     terminal: &mut Terminal<CrosstermBackend<io::Stdout>>,
     catalog: &[Candidate],
+    context: &Context,
     initial: &str,
-) -> io::Result<Option<String>> {
+) -> io::Result<Option<Applied>> {
     let mut query = initial.to_owned();
     let mut selected = 0_usize;
     loop {
@@ -92,7 +97,9 @@ fn run_loop(
             match key.code {
                 KeyCode::Esc => return Ok(None),
                 KeyCode::Enter | KeyCode::Tab => {
-                    return Ok(suggestions.get(selected).map(|item| item.value.clone()));
+                    return Ok(suggestions
+                        .get(selected)
+                        .map(|item| context.apply(&item.value)));
                 }
                 KeyCode::Up => selected = selected.saturating_sub(1),
                 KeyCode::Down => {
