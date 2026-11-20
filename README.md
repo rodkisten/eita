@@ -4,7 +4,44 @@ Autocomplete contextual para Zsh, escrito em Rust. Combina [Frizbee](https://git
 
 > **Protótipo inicial:** sugestões acionadas pelo usuário, sem substituir o sistema nativo de completions do Zsh e sem executar o comando sugerido.
 
-## Instalar
+## ⚡ Instalação pelo GitHub Release
+
+Depois de publicar a primeira release, instale o binário apropriado para **Linux x64/ARM64** ou **macOS Intel/Apple Silicon** com um único comando:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/rodkisten/eita/main/install.sh | sh
+```
+
+O instalador detecta a plataforma, baixa o artefato do último release, verifica o **SHA-256**, instala o executável em `~/.local/bin/eita` e o plugin em `~/.local/share/eita/eita.plugin.zsh`. Não precisa instalar Rust.
+
+**Experimente imediatamente, mesmo sem configurar o PATH:**
+
+```sh
+"$HOME/.local/bin/eita" suggest --line "git comit --am"
+```
+
+Para permitir `eita` como comando global e habilitar o atalho no Zsh, coloque no seu `~/.zshrc`:
+
+```zsh
+export PATH="$HOME/.local/bin:$PATH"
+source "$HOME/.local/share/eita/eita.plugin.zsh"
+```
+
+Depois, abra um novo Zsh e experimente `Ctrl+Espaço`. O plugin é opcional e o instalador não modifica `~/.zshrc` automaticamente.
+
+**Personalização e versão fixa:**
+
+Em um pipeline, as variáveis de instalação devem ser passadas ao processo `sh`:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/rodkisten/eita/main/install.sh | EITA_INSTALL_DIR="$HOME/bin" sh
+curl -fsSL https://raw.githubusercontent.com/rodkisten/eita/main/install.sh | EITA_VERSION=main-COLE_A_TAG sh
+```
+
+Para mais detalhes sobre os artefatos, confira [Builds e Releases](docs/RELEASES.md).
+
+
+## Compilar a partir do código-fonte
 
 Requer Rust 1.89+ e Zsh.
 

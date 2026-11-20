@@ -1,0 +1,159 @@
+name: "📦 Eita · Build & Release"
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - '.github/workflows/release.yml'
+      - 'install.sh'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - 'src/**'
+      - 'integrations/zsh/**'
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    name: "✅ Validate source"
+    if: github.event_name == 'pull_request' || github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+      - name: Rust format
+        run: cargo fmt --all -- --check
+      - name: Rust lint
+        run: cargo clippy --all-targets -- -D warnings
+      - name: Unit tests
+        run: cargo test --all-targets
+      - name: Installer shell syntax
+        run: sh -n install.sh
+      - name: Zsh plugin syntax
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq zsh
+          zsh -n integrations/zsh/eita.plugin.zsh
+
+  build:
+    name: "🦀 ${{ matrix.target }}"
+    needs: verify
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-24.04
+            target: x86_64-unknown-linux-gnu
+          - os: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-gnu
+          - os: macos-15-intel
+            target: x86_64-apple-darwin
+          - os: macos-15
+            target: aarch64-apple-darwin
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.target }}
+      - name: Compile optimized binary
+        env:
+          TARGET: ${{ matrix.target }}
+        run: cargo build --release --target "$TARGET"
+      - name: Smoke test
+        shell: bash
+        env:
+          TARGET: ${{ matrix.target }}
+        run: |
+          set -euo pipefail
+          binary="target/$TARGET/release/eita"
+          "$binary" --version
+          "$binary" suggest --line 'git com' --format lines | grep -F 'git commit'
+          "$binary" bench --iterations 10
+      - name: Package binary, plugin and checksums
+        shell: bash
+        env:
+          TARGET: ${{ matrix.target }}
+        run: |
+          set -euo pipefail
+          staging="$(mktemp -d)"
+          mkdir -p "$staging/integrations/zsh" dist
+          cp "target/$TARGET/release/eita" "$staging/eita"
+          chmod 0755 "$staging/eita"
+          cp README.md LICENSE "$staging/"
+          cp integrations/zsh/eita.plugin.zsh "$staging/integrations/zsh/"
+          archive="eita-$TARGET.tar.gz"
+          tar -czf "dist/$archive" -C "$staging" .
+          (
+            cd dist
+            if command -v sha256sum >/dev/null 2>&1; then
+              sha256sum "$archive" > "$archive.sha256"
+            else
+              shasum -a 256 "$archive" > "$archive.sha256"
+            fi
+          )
+          rm -rf "$staging"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: eita-${{ matrix.target }}
+          path: dist/*
+          if-no-files-found: error
+          retention-days: 30
+
+  release:
+    name: "🚀 Publish GitHub Release"
+    if: github.ref == 'refs/heads/main'
+    needs: build
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - name: Download all architecture artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: eita-*
+          merge-multiple: true
+          path: dist
+      - name: Validate all packages and their checksums
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(find dist -maxdepth 1 -type f -name '*.tar.gz' | wc -l)" -eq 4
+          test "$(find dist -maxdepth 1 -type f -name '*.sha256' | wc -l)" -eq 4
+          for file in dist/*.sha256; do
+            (cd dist && sha256sum -c "$(basename "$file")")
+          done
+      - name: Create or update commit-specific release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          COMMIT_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          tag="main-${COMMIT_SHA:0:12}"
+          if ! gh release view "$tag" >/dev/null 2>&1; then
+            gh release create "$tag" \
+              --target "$COMMIT_SHA" \
+              --title "Eita · ${COMMIT_SHA:0:12}" \
+              --notes "Automated build for main commit $COMMIT_SHA. Linux x86_64/ARM64 and macOS Intel/Apple Silicon. Every archive has a corresponding SHA-256 checksum." \
+              --latest=false
+          fi
+          gh release upload "$tag" dist/*.tar.gz dist/*.sha256 --clobber
+          head_sha="$(gh api "repos/$GH_REPO/branches/main" --jq '.commit.sha')"
+          if [ "$head_sha" = "$COMMIT_SHA" ]; then
+            gh release edit "$tag" --latest
+            echo "Promoted $tag to latest"
+          else
+            echo "$tag published without replacing latest: main advanced to $head_sha"
+          fi
+          echo "Release: https://github.com/$GH_REPO/releases/tag/$tag" >> "$GITHUB_STEP_SUMMARY"

@@ -33,3 +33,7 @@ Texto fantasma via widget ZLE, popup Ratatui opt-in para lista e integração se
 ### P4: desempenho
 
 Datasets congelados, cold/warm start, p50/p95/p99, memória e qualidade do ranking comparando Frizbee, Nucleo e FZF.
+
+## Distribuição
+
+A pipeline [Build & Release](../.github/workflows/release.yml) valida fontes, compila quatro targets nativos, cria archives com SHA-256, anexa artefatos ao workflow e publica GitHub Release por SHA de commit na `main`. O instalador [install.sh](../install.sh) seleciona a arquitetura e exige verificação de checksum. Consulte [docs/RELEASES.md](RELEASES.md).
