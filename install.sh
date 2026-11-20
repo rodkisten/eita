@@ -1,7 +1,7 @@
 #!/bin/sh
 # Install a verified Eita GitHub Release on Linux or macOS.
 # Usage: curl -fsSL https://raw.githubusercontent.com/rodkisten/eita/main/install.sh | sh
-# Optional: EITA_VERSION=main-<sha> EITA_INSTALL_DIR=/path/to/bin
+# Optional: EITA_VERSION=main-<sha>|pr-<number> EITA_INSTALL_DIR=/path/to/bin
 set -eu
 
 die() {
@@ -35,14 +35,14 @@ case "$release" in
   latest)
     base="https://github.com/rodkisten/eita/releases/latest/download"
     ;;
-  main-*)
+  main-*|pr-*)
     case "$release" in
-      *[!A-Za-z0-9._-]*) die "invalid release tag: $release" ;;
+      *[!A-Za-z0-9._-]*|'main-'|'pr-') die "invalid release tag: $release" ;;
     esac
     base="https://github.com/rodkisten/eita/releases/download/$release"
     ;;
   *)
-    die "EITA_VERSION must be latest or a main-<commit> release tag"
+    die "EITA_VERSION must be latest, main-<commit>, or pr-<number>"
     ;;
 esac
 

@@ -41,6 +41,31 @@ curl -fsSL https://raw.githubusercontent.com/rodkisten/eita/main/install.sh | EI
 Para mais detalhes sobre os artefatos, confira [Builds e Releases](docs/RELEASES.md).
 
 
+### 🔗 Links curtos e previews de pull requests
+
+O [Shell Workbench](https://shell.migos.club) oferece um instalador permanente, sem precisar copiar URLs do GitHub:
+
+~~~sh
+curl -fsSL https://shell.migos.club/install/eita | sh
+~~~
+
+O build de um PR pode ser instalado usando o número do PR, e o endereço não muda quando novos commits são enviados:
+
+~~~sh
+curl -fsSL https://shell.migos.club/install/eita/pr/2 | sh
+~~~
+
+Você também pode baixar o arquivo diretamente, sem executar o instalador:
+
+~~~sh
+curl -fL https://shell.migos.club/install/eita/pr/3/artifact -o eita-pr-3.tar.gz
+curl -fL https://shell.migos.club/install/eita/pr/3/checksum -o eita-pr-3.tar.gz.sha256
+~~~
+
+O link do arquivo binário e o link curto são publicados automaticamente em um comentário atualizado do PR quando a compilação e a verificação dos checksums terminam. Os previews são **prereleases** `pr-<número>` e não alteram o `latest` da main. Previews são removidos quando o PR é fechado. A publicação exige um PR interno ao repositório e a permissão `contents: write` do GitHub Actions.
+
+**Nota:** os links curtos dependem também da rota `/install/eita/*` publicada no repositório `rodkisten/shell`. Antes dos merges correspondentes, use o instalador via `raw.githubusercontent.com`.
+
 ## Compilar a partir do código-fonte
 
 Requer Rust 1.89+ e Zsh.
