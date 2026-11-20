@@ -3,6 +3,24 @@
 [[ -o interactive ]] || return 0
 (( $+commands[eita] )) || return 0
 
+
+# Typed configuration is read once at startup. Do not eval TOML or shell code.
+_eita_load_settings() {
+  emulate -L zsh
+  local key value
+  while IFS=$'\t' read -r key value; do
+    case "$key" in
+      EITA_POPUP_WIDTH|EITA_POPUP_HEIGHT|EITA_POPUP_THEME|EITA_POPUP_ALIGN|EITA_POPUP_POSITION|EITA_RECOVER_ENABLED|EITA_INLINE_ENABLED|EITA_KEY_POPUP|EITA_KEY_POPUP_FALLBACK|EITA_KEY_ACCEPT|EITA_KEY_REINDEX)
+        [[ -n "$value" ]] || continue
+        if [[ -z "${(P)key}" ]]; then
+          typeset -gx "$key=$value"
+        fi
+        ;;
+    esac
+  done < <(command eita config zsh 2>/dev/null)
+}
+_eita_load_settings
+
 _eita_pick_widget() {
   emulate -L zsh
   setopt localoptions no_aliases
@@ -43,8 +61,8 @@ _eita_pick_widget() {
 
 zle -N eita-pick _eita_pick_widget
 # Ctrl+Space can be intercepted by the terminal; Ctrl+X Ctrl+P is a fallback.
-bindkey '^@' eita-pick
-bindkey '^X^P' eita-pick
+bindkey "${EITA_KEY_POPUP:-^@}" eita-pick
+bindkey "${EITA_KEY_POPUP_FALLBACK:-^X^P}" eita-pick
 
 
 # Build an offline cache of literal option and subcommand specifications from fpath.
@@ -62,7 +80,7 @@ _eita_index_widget() {
   zle redisplay
 }
 zle -N eita-reindex _eita_index_widget
-bindkey '^X^I' eita-reindex
+bindkey "${EITA_KEY_REINDEX:-^X^I}" eita-reindex
 
 
 # ── Opt-in ghost text ────────────────────────────────────────────────────────
@@ -129,7 +147,7 @@ _eita_inline_accept() {
 }
 zle -N eita-inline-accept _eita_inline_accept
 # Never intercept native Tab or Right Arrow. Ctrl+X Ctrl+E accepts ghost text.
-bindkey '^X^E' eita-inline-accept
+bindkey "${EITA_KEY_ACCEPT:-^X^E}" eita-inline-accept
 
 # Use native hook composition. No monkey-patching zle-line-pre-redraw.
 autoload -Uz add-zle-hook-widget
@@ -179,16 +197,16 @@ eita-usage-off() {
 eita-popup() {
   emulate -L zsh
   local query="${*:-git com}"
-  command eita popup --line "$query" --height 8
+  command eita popup --line "$query"
 }
 
 eita-keys() {
   emulate -L zsh
-  print -r -- '🦀 Ctrl+Space / Ctrl+X Ctrl+P = picker Ratatui'
-  print -r -- '   Ctrl+X Ctrl+E = accept ghost text'
-  bindkey '^@'
-  bindkey '^X^P'
-  bindkey '^X^E'
+  print -r -- "🦀 Popup: ${EITA_KEY_POPUP:-^@}, fallback ${EITA_KEY_POPUP_FALLBACK:-^X^P}"
+  print -r -- "   Accept ghost: ${EITA_KEY_ACCEPT:-^X^E}"
+  bindkey "${EITA_KEY_POPUP:-^@}"
+  bindkey "${EITA_KEY_POPUP_FALLBACK:-^X^P}"
+  bindkey "${EITA_KEY_ACCEPT:-^X^E}"
 }
 
 
@@ -285,7 +303,7 @@ _eita_command_not_found_handler() {
   # Keep the error in scrollback; Ratatui renders before the next Zsh prompt.
   print -ru2 -- "zsh: command not found: $missing"
   command eita recover --word "$missing" --kind command \
-    --symbols-file "$symbols" --popup --height 8 --output "$selected" \
+    --symbols-file "$symbols" --popup --output "$selected" \
     </dev/tty >/dev/tty
   status=$?
   if (( status == 0 )) && [[ -s "$selected" ]]; then

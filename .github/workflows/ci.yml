@@ -69,6 +69,9 @@ jobs:
           EITA_USAGE_ENABLED=1 EITA_USAGE_FILE="$RUNNER_TEMP/eita-usage.json" ./target/release/eita usage status | grep -F 'git commit'
           ./target/release/eita bench --iterations 25 --compare | grep -F 'nucleo-matcher'
           ./target/release/eita popup --help | grep -F -- '--height'
+          EITA_CONFIG="$RUNNER_TEMP/eita-ui.toml" ./target/release/eita config init
+          EITA_CONFIG="$RUNNER_TEMP/eita-ui.toml" ./target/release/eita config show | grep -F 'width = 48'
+          EITA_CONFIG="$RUNNER_TEMP/eita-ui.toml" ./target/release/eita config zsh | grep -F $'EITA_KEY_POPUP_FALLBACK\t^X^P'
           ./target/release/eita recover --word gti --symbols-file "$GITHUB_WORKSPACE/tests/fixtures/symbols.tsv" --format lines | grep -x git
           ./target/release/eita recover --word earxh --symbols-file "$GITHUB_WORKSPACE/tests/fixtures/symbols.tsv" --format lines | grep -x search
           ./target/release/eita recover --word EDTIOR --kind variable --symbols-file "$GITHUB_WORKSPACE/tests/fixtures/symbols.tsv" --format lines | grep -x EDITOR

@@ -1,6 +1,7 @@
 mod benchmark;
 mod catalog;
 mod completion;
+mod config;
 mod context;
 mod engine;
 mod inline;
@@ -61,8 +62,8 @@ enum Commands {
         #[arg(long, requires = "output")]
         cursor_output: Option<PathBuf>,
         /// Altura compacta para terminais móveis (6 a 12 linhas).
-        #[arg(long, default_value_t = 8, value_parser = clap::value_parser!(u16).range(6..=12))]
-        height: u16,
+        #[arg(long, value_parser = clap::value_parser!(u16).range(6..=14))]
+        height: Option<u16>,
     },
     /// Indexa definições literais das completions nativas do Zsh sem executá-las.
     Index {
@@ -100,13 +101,18 @@ enum Commands {
         popup: bool,
         #[arg(long, requires = "popup")]
         output: Option<PathBuf>,
-        #[arg(long, default_value_t = 8, value_parser = clap::value_parser!(u16).range(6..=12))]
-        height: u16,
+        #[arg(long, value_parser = clap::value_parser!(u16).range(6..=14))]
+        height: Option<u16>,
     },
     /// Histórico local opt-in, guardando SOMENTE templates reconhecidos.
     Usage {
         #[command(subcommand)]
         action: UsageAction,
+    },
+    /// Configuração do popup, teclas e gatilhos.
+    Config {
+        #[command(subcommand)]
+        action: ConfigAction,
     },
     /// Mede busca ou compara Frizbee e Nucleo no mesmo dataset.
     Bench {
@@ -115,6 +121,19 @@ enum Commands {
         #[arg(long)]
         compare: bool,
     },
+}
+
+#[derive(Subcommand)]
+enum ConfigAction {
+    /// Gera um config.toml com valores padrão.
+    Init {
+        #[arg(long)]
+        force: bool,
+    },
+    /// Mostra configuração efetiva (TOML).
+    Show,
+    /// Exporta pares TSV seguros para o plugin Zsh.
+    Zsh,
 }
 
 #[derive(Subcommand)]
@@ -173,6 +192,21 @@ fn context(line: Option<String>, left: Option<String>, right: String) -> Context
 
 fn main() -> Result<(), Box<dyn Error>> {
     let cli = Cli::parse();
+    if let Commands::Config { action } = &cli.command {
+        match action {
+            ConfigAction::Init { force } => {
+                println!("{}", config::Config::init(*force)?.display());
+            }
+            ConfigAction::Show => {
+                println!("{}", toml::to_string_pretty(&config::Config::load()?)?);
+            }
+            ConfigAction::Zsh => {
+                print!("{}", config::Config::load()?.zsh_pairs());
+            }
+        }
+        return Ok(());
+    }
+    let settings = config::Config::load()?;
     let catalog = if matches!(
         &cli.command,
         Commands::Inline { .. } | Commands::Recover { .. }
@@ -223,7 +257,11 @@ fn main() -> Result<(), Box<dyn Error>> {
             height,
         } => {
             let context = context(line, left, right);
-            if let Some(applied) = ui::pick(&catalog, &context, &usage, height)? {
+            let mut popup = settings.popup.clone();
+            if let Some(height) = height {
+                popup.height = height;
+            }
+            if let Some(applied) = ui::pick(&catalog, &context, &usage, &popup)? {
                 if let Some(path) = output {
                     fs::write(path, applied.replacement.as_bytes())?;
                     if let Some(cursor_path) = cursor_output {
@@ -261,7 +299,11 @@ fn main() -> Result<(), Box<dyn Error>> {
             let symbols = recover::read_symbols(&symbols_file)?;
             let suggestions = recover::recover(&word, &symbols, kind.as_str(), limit);
             if popup {
-                if let Some(name) = ui::recover_interactive(&word, &suggestions, height)? {
+                let mut style = settings.popup.clone();
+                if let Some(height) = height {
+                    style.height = height;
+                }
+                if let Some(name) = ui::recover_interactive(&word, &suggestions, &style)? {
                     if let Some(path) = output {
                         fs::write(path, name.as_bytes())?;
                     } else {
@@ -305,6 +347,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                 println!("Local template usage cleared");
             }
         },
+        Commands::Config { .. } => unreachable!("config handled before catalog loading"),
         Commands::Bench {
             iterations,
             compare,

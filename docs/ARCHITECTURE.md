@@ -84,3 +84,16 @@ Se um handler anterior existia, ele é restaurado com `eita-recover-off`.
 O plugin não mostra o popup em sessões não interativas ou sem TTY.
 Variáveis requerem a consulta explícita `eita-what ... variable`,
 porque expansões de variáveis desconhecidas não ativam o handler.
+
+
+## Configuração e renderização compacta
+
+`src/config.rs` lê `config.toml` via Serde/TOML, valida intervalos, gera
+um arquivo padrão e exporta um conjunto fechado de pares TSV para o
+plugin Zsh. Nenhum `eval` é necessário. `src/ui.rs` desenha uma caixa
+com `popup.width`, `popup.align` e paleta pré-definida dentro do
+`Viewport::Inline`: a área **externa continua usando a largura total
+do terminal**. `position` alinha dentro dessa área, não em relação
+às coordenadas absolutas do cursor. Um renderizador ancorado ao
+ZLE e um processo de sugestões persistente estão descritos em
+`docs/DAEMON.md`.

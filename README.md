@@ -255,6 +255,19 @@ O Ratatui usa uma viewport inline **entre a mensagem de erro e o próximo
 prompt**, preservando o scrollback. Ele não é um overlay gráfico fixo
 no topo da tela do iPhone.
 
+## 🎛️ Popup personalizável
+
+~~~sh
+eita config init             # cria ~/.config/eita/config.toml
+eita config show             # opções efetivas
+eita popup --line 'git com'  # caixa visualmente compacta, tema editável
+~~~
+
+Configure largura, altura, tema, alinhamento, atalhos e gatilho automático
+pelo arquivo TOML. Veja [configuração e atalhos](docs/CONFIGURATION.md).
+O serviço de índice em memória ainda é um
+[bloco de arquitetura planejado](docs/DAEMON.md), não um daemon já instalado.
+
 ## Desenvolvimento
 
 ~~~sh
