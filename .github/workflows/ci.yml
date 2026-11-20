@@ -1,0 +1,57 @@
+name: Rust · validate
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '**/*.rs'
+      - Cargo.toml
+      - Cargo.lock
+      - rust-toolchain.toml
+      - '.github/workflows/ci.yml'
+      - 'integrations/zsh/**'
+  pull_request:
+    paths:
+      - '**/*.rs'
+      - Cargo.toml
+      - Cargo.lock
+      - rust-toolchain.toml
+      - '.github/workflows/ci.yml'
+      - 'integrations/zsh/**'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: eita-validate-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  rust:
+    name: cargo fmt · clippy · test · build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+      - name: Format
+        run: cargo fmt --all -- --check
+      - name: Lint
+        run: cargo clippy --all-targets -- -D warnings
+      - name: Test
+        run: cargo test --all-targets
+      - name: Build release
+        run: cargo build --release
+      - name: Smoke
+        run: |
+          ./target/release/eita suggest --line 'git com' --format lines | grep 'git commit'
+          ./target/release/eita suggest --line 'got' --format lines | grep '^git$'
+          ./target/release/eita bench --iterations 50
+      - name: Check Zsh plugin syntax
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq zsh
+          zsh -n integrations/zsh/eita.plugin.zsh
