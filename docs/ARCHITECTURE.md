@@ -65,3 +65,22 @@ O plugin ZLE usa `POSTDISPLAY` e `region_highlight` apenas quando
 aplicado com Ctrl+X Ctrl+E. Não assume a variável de exibição quando outro
 plugin a controla; as callbacks são registradas com `add-zle-hook-widget`,
 sem substituir `compinit` ou o Tab. Veja `docs/INLINE.md`.
+
+
+## Recuperação de comandos inexistentes (Zsh)
+
+O plugin usa `command_not_found_handler` para detectar falhas reais
+na resolução de comandos. Coleta somente **nomes**, sem valores, de
+executáveis, aliases, funções, builtins, palavras reservadas e parâmetros
+do Zsh e envia-os por TSV temporário ao CLI `eita recover`.
+
+`src/recover.rs` valida nomes, aplica distância Optimal String Alignment,
+ranqueia as correções e evita sugestões muito distantes. O popup Ratatui
+é renderizado na viewport inline **antes do próximo prompt**.
+Ao selecionar, o plugin chama `print -z` para preparar o comando
+corrigido como texto editável, **sem executá-lo**. O status permanece 127.
+
+Se um handler anterior existia, ele é restaurado com `eita-recover-off`.
+O plugin não mostra o popup em sessões não interativas ou sem TTY.
+Variáveis requerem a consulta explícita `eita-what ... variable`,
+porque expansões de variáveis desconhecidas não ativam o handler.

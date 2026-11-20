@@ -120,3 +120,66 @@ O modo inline e o seletor interativo são **experiências distintas**:
 automaticamente o cursor precisa de uma integração com controle
 coordenado da TUI e do ZLE; iniciar Ratatui a cada tecla bloquearia
 a própria edição da linha.
+
+## 🧠 Correção automática de erros de digitação
+
+Quando você executa `gti status` e o Zsh não encontra `gti`,
+o Eita mostra um **popup Ratatui compacto antes do próximo prompt**,
+com os comandos mais próximos que existem na sessão atual:
+
+~~~text
+zsh: command not found: gti
+🦀 Eita: 'gti' não existe. Quis dizer?
+  1  git    [command] Executável disponível no PATH
+↑↓ selecionar · Enter editar · Esc sair
+~~~
+
+O Eita consulta **nomes reais** de executáveis no PATH, aliases, funções,
+builtins e palavras reservadas. Os nomes de variáveis também podem ser
+verificados explicitamente, mas seus valores nunca são acessados.
+
+Ao escolher uma correção, o Eita coloca o comando e os argumentos originais
+com escape no próximo buffer de edição (`print -z`). **Não executa nada
+sozinho**. O erro original mantém status **127**.
+
+### Comandos de teste
+
+~~~zsh
+source "$HOME/.local/share/eita/eita.plugin.zsh"
+eita-recover-on        # ativado automaticamente quando carrega o plugin
+gti status             # deve abrir o popup após erro
+eita-recover-off       # desliga e restaura o handler anterior
+eita-what 'EDTIOR' variable
+~~~
+
+O handler é instalado automaticamente em sessões Zsh interativas que carregam
+o plugin, a menos que você defina `EITA_RECOVER_ENABLED=0` antes do `source`.
+Se já existia `command_not_found_handler`, o Eita o preserva para quando não
+existem sugestões. Esc mantém o erro 127 sem executar comandos. Em scripts ou terminais sem TTY,
+não inicia a interface.
+
+**Variáveis:** um `$EDTIOR` inexistente costuma expandir para vazio e
+não dispara o handler de comando. Consulte com `eita-what`.
+
+**Subcomandos:** `git comit` executa `git` normalmente e pode falhar com
+outro código. Para esse caso, continue utilizando o picker manual:
+`eita popup --line "git comit"`.
+
+### API Rust
+
+~~~sh
+eita recover --word gti --symbols-file symbols.tsv --format json
+eita recover --word '$EDTIOR' --kind variable --symbols-file symbols.tsv
+eita recover --word gti --popup --symbols-file symbols.tsv --height 8
+~~~
+
+`symbols.tsv` possui linhas `tipo<TAB>nome<TAB>descrição` e é criado
+temporariamente pelo plugin. O ranking usa distância de edição
+**Optimal String Alignment** (substituição, inserção, remoção e
+transposição adjacente), bônus por tipo, limites conservadores de distância
+e remoção de duplicatas. Nunca executa funções, aliases ou comandos
+durante a coleta dos nomes.
+
+O Ratatui usa uma viewport inline **entre a mensagem de erro e o próximo
+prompt**, preservando o scrollback. Ele não é um overlay gráfico fixo
+no topo da tela do iPhone.

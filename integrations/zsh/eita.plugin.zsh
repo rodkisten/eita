@@ -134,10 +134,10 @@ bindkey '^X^E' eita-inline-accept
 # Use native hook composition. No monkey-patching zle-line-pre-redraw.
 autoload -Uz add-zle-hook-widget
 if (( $+functions[add-zle-hook-widget] )); then
-  add-zle-hook-widget -d line-pre-redraw _eita_inline_pre_redraw 2>/dev/null
-  add-zle-hook-widget -d line-finish _eita_inline_finish 2>/dev/null
-  add-zle-hook-widget line-pre-redraw _eita_inline_pre_redraw 2>/dev/null
-  add-zle-hook-widget line-finish _eita_inline_finish 2>/dev/null
+  add-zle-hook-widget -d line-pre-redraw _eita_inline_pre_redraw 2>/dev/null || true
+  add-zle-hook-widget -d line-finish _eita_inline_finish 2>/dev/null || true
+  add-zle-hook-widget line-pre-redraw _eita_inline_pre_redraw 2>/dev/null || true
+  add-zle-hook-widget line-finish _eita_inline_finish 2>/dev/null || true
 fi
 
 eita-inline-on() {
@@ -190,3 +190,169 @@ eita-keys() {
   bindkey '^X^P'
   bindkey '^X^E'
 }
+
+
+# ── Automatic typo recovery after command-not-found ──────────────────────────
+# Only symbol NAMES are shared with Rust. No alias body, function body, variable
+# value or command argument is indexed. Nothing is executed after selecting.
+_eita_recover_symbols() {
+  emulate -L zsh
+  setopt localoptions no_aliases
+  local destination="$1" name kind
+  : > "$destination" || return 1
+  zmodload zsh/parameter 2>/dev/null || true
+  for kind in command alias function builtin reserved variable; do
+    case "$kind" in
+      command)
+        for name in ${(k)commands}; do
+          [[ "$name" == *$'\t'* || "$name" == *$'\n'* ]] && continue
+          print -r -- "command"$'\t'"$name"$'\t''Executable disponível no PATH'
+        done ;;
+      alias)
+        for name in ${(k)aliases}; do
+          [[ "$name" == *$'\t'* || "$name" == *$'\n'* ]] && continue
+          print -r -- "alias"$'\t'"$name"$'\t''Alias do Zsh'
+        done ;;
+      function)
+        for name in ${(k)functions}; do
+          [[ "$name" == *$'\t'* || "$name" == *$'\n'* ]] && continue
+          print -r -- "function"$'\t'"$name"$'\t''Função do Zsh'
+        done ;;
+      builtin)
+        for name in ${(k)builtins}; do
+          [[ "$name" == *$'\t'* || "$name" == *$'\n'* ]] && continue
+          print -r -- "builtin"$'\t'"$name"$'\t''Comando interno'
+        done ;;
+      reserved)
+        for name in ${(k)reswords}; do
+          [[ "$name" == *$'\t'* || "$name" == *$'\n'* ]] && continue
+          print -r -- "reserved"$'\t'"$name"$'\t''Palavra reservada'
+        done ;;
+      variable)
+        for name in ${(k)parameters}; do
+          [[ "$name" == *$'\t'* || "$name" == *$'\n'* ]] && continue
+          print -r -- "variable"$'\t'"$name"$'\t''Variável definida'
+        done ;;
+    esac
+  done > "$destination"
+}
+
+_eita_original_not_found() {
+  emulate -L zsh
+  if (( $+functions[_eita_previous_command_not_found_handler] )); then
+    _eita_previous_command_not_found_handler "$@"
+  else
+    print -ru2 -- "zsh: command not found: $1"
+  fi
+  return 127
+}
+
+_eita_command_not_found_handler() {
+  emulate -L zsh
+  setopt localoptions no_aliases
+  local missing="$1" temp_dir symbols selected status corrected arg
+  shift
+
+  # Do not start a TUI in scripts, redirected shells or non-tty sessions.
+  if [[ "${EITA_RECOVER_ENABLED:-0}" != 1 || ! -t 0 || ! -t 1 ]] ||
+    (( ! $+commands[eita] )); then
+    _eita_original_not_found "$missing" "$@"
+    return 127
+  fi
+  temp_dir=$(command mktemp -d) || {
+    _eita_original_not_found "$missing" "$@"
+    return 127
+  }
+  symbols="$temp_dir/symbols.tsv"
+  selected="$temp_dir/selected"
+  _eita_recover_symbols "$symbols"
+  if [[ ! -s "$symbols" ]]; then
+    command rm -rf -- "$temp_dir"
+    _eita_original_not_found "$missing" "$@"
+    return 127
+  fi
+
+  # Only take over if the matcher found a plausible, real shell symbol.
+  # Otherwise keep the user's existing command-not-found integration working.
+  if ! command eita recover --word "$missing" --kind command \
+      --symbols-file "$symbols" --format lines > "$temp_dir/matches" ||
+      [[ ! -s "$temp_dir/matches" ]]; then
+    command rm -rf -- "$temp_dir"
+    _eita_original_not_found "$missing" "$@"
+    return 127
+  fi
+
+  # Keep the error in scrollback; Ratatui renders before the next Zsh prompt.
+  print -ru2 -- "zsh: command not found: $missing"
+  command eita recover --word "$missing" --kind command \
+    --symbols-file "$symbols" --popup --height 8 --output "$selected" \
+    </dev/tty >/dev/tty
+  status=$?
+  if (( status == 0 )) && [[ -s "$selected" ]]; then
+    corrected=$(<"$selected")
+    # Restore the original arguments as shell-quoted text, for editing only.
+    local -a rest=()
+    for arg in "$@"; do
+      rest+=("${(q)arg}")
+    done
+    if (( ${#rest} )); then
+      corrected+=" ${(j: :)rest}"
+    fi
+    print -z -- "$corrected"
+    print -ru2 -- "🦀 Eita: correção preparada no próximo prompt, sem executar."
+  fi
+  command rm -rf -- "$temp_dir"
+  return 127
+}
+
+eita-recover-on() {
+  emulate -L zsh
+  setopt localoptions no_aliases
+  if [[ "${_eita_recover_installed:-0}" == 1 ]]; then
+    export EITA_RECOVER_ENABLED=1
+    return 0
+  fi
+  zmodload zsh/parameter 2>/dev/null || true
+  if (( $+functions[command_not_found_handler] )) &&
+    (( ! $+functions[_eita_previous_command_not_found_handler] )); then
+    functions -c command_not_found_handler _eita_previous_command_not_found_handler
+  fi
+  functions -c _eita_command_not_found_handler command_not_found_handler
+  typeset -g _eita_recover_installed=1
+  export EITA_RECOVER_ENABLED=1
+}
+
+eita-recover-off() {
+  emulate -L zsh
+  export EITA_RECOVER_ENABLED=0
+  [[ "${_eita_recover_installed:-0}" == 1 ]] || return 0
+  typeset -g _eita_recover_installed=0
+  if (( $+functions[_eita_previous_command_not_found_handler] )); then
+    functions -c _eita_previous_command_not_found_handler command_not_found_handler
+    unfunction _eita_previous_command_not_found_handler
+  else
+    unfunction command_not_found_handler 2>/dev/null
+  fi
+}
+
+# Debug arbitrary command names or typos in variable names. Values stay private.
+eita-what() {
+  emulate -L zsh
+  local word="$1" kind="${2:-all}" temp_dir
+  [[ -n "$word" ]] || {
+    print -ru2 -- 'Usage: eita-what WORD [command|variable|all]'
+    return 2
+  }
+  temp_dir=$(command mktemp -d) || return 1
+  _eita_recover_symbols "$temp_dir/symbols.tsv"
+  command eita recover --word "$word" --kind "$kind" \
+    --symbols-file "$temp_dir/symbols.tsv" --format json
+  local status=$?
+  command rm -rf -- "$temp_dir"
+  return $status
+}
+
+# Default to recovery for interactive shells, unless explicitly opted out.
+if [[ "${EITA_RECOVER_ENABLED:-1}" == 1 ]]; then
+  eita-recover-on
+fi

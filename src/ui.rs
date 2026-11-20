@@ -134,3 +134,110 @@ fn run_loop(
         }
     }
 }
+
+/// A compact picker that is invoked only *after* the shell reports an unknown
+/// command. This viewport appears in the scrollback above the next prompt.
+pub fn recover_interactive(
+    word: &str,
+    corrections: &[crate::recover::Correction],
+    height: u16,
+) -> io::Result<Option<String>> {
+    if corrections.is_empty() {
+        return Ok(None);
+    }
+    enable_raw_mode()?;
+    let backend = CrosstermBackend::new(io::stdout());
+    let mut terminal = match Terminal::with_options(
+        backend,
+        TerminalOptions {
+            viewport: Viewport::Inline(height),
+        },
+    ) {
+        Ok(terminal) => terminal,
+        Err(error) => {
+            let _ = disable_raw_mode();
+            return Err(error);
+        }
+    };
+    let result = recover_loop(&mut terminal, word, corrections);
+    let _ = terminal.clear();
+    drop(terminal);
+    disable_raw_mode()?;
+    result
+}
+
+fn recover_loop(
+    terminal: &mut Terminal<CrosstermBackend<io::Stdout>>,
+    word: &str,
+    corrections: &[crate::recover::Correction],
+) -> io::Result<Option<String>> {
+    let mut selected = 0usize;
+    loop {
+        terminal.draw(|frame| {
+            let [header, rows, footer] = Layout::vertical([
+                Constraint::Length(2),
+                Constraint::Min(2),
+                Constraint::Length(1),
+            ])
+            .areas(frame.area());
+            let title = Paragraph::new(format!("🦀 Eita: '{word}' não existe. Quis dizer?")).style(
+                Style::default()
+                    .fg(Color::Cyan)
+                    .add_modifier(Modifier::BOLD),
+            );
+            frame.render_widget(title, header);
+            let items: Vec<ListItem<'_>> = corrections
+                .iter()
+                .enumerate()
+                .map(|(index, choice)| {
+                    ListItem::new(Line::from(vec![
+                        Span::styled(
+                            format!("{}  {}", index + 1, choice.name),
+                            Style::default()
+                                .fg(Color::White)
+                                .add_modifier(Modifier::BOLD),
+                        ),
+                        Span::styled(
+                            format!("  [{}] {}", choice.kind, choice.description),
+                            Style::default().fg(Color::Gray),
+                        ),
+                    ]))
+                })
+                .collect();
+            let list = List::new(items)
+                .block(Block::default().borders(Borders::TOP | Borders::BOTTOM))
+                .highlight_symbol("› ")
+                .highlight_style(Style::default().bg(Color::Blue));
+            let mut state = ListState::default();
+            state.select(Some(selected));
+            frame.render_stateful_widget(list, rows, &mut state);
+            frame.render_widget(
+                "↑↓ selecionar · 1-5 escolha · Enter editar · Esc sair",
+                footer,
+            );
+        })?;
+        if let Event::Key(key) = event::read()? {
+            if key.kind != KeyEventKind::Press {
+                continue;
+            }
+            match key.code {
+                KeyCode::Esc => return Ok(None),
+                KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                    return Ok(None);
+                }
+                KeyCode::Enter | KeyCode::Tab => {
+                    return Ok(corrections.get(selected).map(|item| item.name.clone()));
+                }
+                KeyCode::Up => selected = selected.saturating_sub(1),
+                KeyCode::Down => selected = (selected + 1).min(corrections.len() - 1),
+                KeyCode::Char(digit @ '1'..='9') => {
+                    let index = digit as usize - '1' as usize;
+                    if let Some(item) = corrections.get(index) {
+                        return Ok(Some(item.name.clone()));
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+}

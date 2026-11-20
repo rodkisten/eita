@@ -1,0 +1,7 @@
+command	git	Git version control
+command	docker	Containers
+command	search	Search command
+alias	gco	Git checkout alias
+function	deploy	Deploy utility
+builtin	echo	Print
+variable	EDITOR	Editor command

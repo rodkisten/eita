@@ -4,6 +4,7 @@ mod completion;
 mod context;
 mod engine;
 mod inline;
+mod recover;
 mod ui;
 mod usage;
 
@@ -83,6 +84,25 @@ enum Commands {
         #[arg(long)]
         left: String,
     },
+    /// Corrige erros usando simbolos reais (comandos, aliases, funcoes ou variaveis).
+    Recover {
+        #[arg(long)]
+        word: String,
+        #[arg(long)]
+        symbols_file: PathBuf,
+        #[arg(long, value_enum, default_value_t = RecoveryKind::Command)]
+        kind: RecoveryKind,
+        #[arg(long, default_value_t = 5)]
+        limit: usize,
+        #[arg(long, value_enum, default_value_t = Format::Json)]
+        format: Format,
+        #[arg(long)]
+        popup: bool,
+        #[arg(long, requires = "popup")]
+        output: Option<PathBuf>,
+        #[arg(long, default_value_t = 8, value_parser = clap::value_parser!(u16).range(6..=12))]
+        height: u16,
+    },
     /// Histórico local opt-in, guardando SOMENTE templates reconhecidos.
     Usage {
         #[command(subcommand)]
@@ -108,6 +128,31 @@ enum UsageAction {
 }
 
 #[derive(Copy, Clone, Debug, ValueEnum)]
+enum RecoveryKind {
+    Command,
+    Alias,
+    Function,
+    Builtin,
+    Reserved,
+    Variable,
+    All,
+}
+
+impl RecoveryKind {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Command => "command",
+            Self::Alias => "alias",
+            Self::Function => "function",
+            Self::Builtin => "builtin",
+            Self::Reserved => "reserved",
+            Self::Variable => "variable",
+            Self::All => "all",
+        }
+    }
+}
+
+#[derive(Copy, Clone, Debug, ValueEnum)]
 enum Format {
     Json,
     Lines,
@@ -128,7 +173,10 @@ fn context(line: Option<String>, left: Option<String>, right: String) -> Context
 
 fn main() -> Result<(), Box<dyn Error>> {
     let cli = Cli::parse();
-    let catalog = if matches!(&cli.command, Commands::Inline { .. }) {
+    let catalog = if matches!(
+        &cli.command,
+        Commands::Inline { .. } | Commands::Recover { .. }
+    ) {
         catalog::load_inline_catalog()
     } else {
         catalog::load_catalog()
@@ -199,6 +247,39 @@ fn main() -> Result<(), Box<dyn Error>> {
                 completion::rebuild(fpath.as_deref(), &destination)?
             };
             println!("{}", serde_json::to_string_pretty(&report)?);
+        }
+        Commands::Recover {
+            word,
+            symbols_file,
+            kind,
+            limit,
+            format,
+            popup,
+            output,
+            height,
+        } => {
+            let symbols = recover::read_symbols(&symbols_file)?;
+            let suggestions = recover::recover(&word, &symbols, kind.as_str(), limit);
+            if popup {
+                if let Some(name) = ui::recover_interactive(&word, &suggestions, height)? {
+                    if let Some(path) = output {
+                        fs::write(path, name.as_bytes())?;
+                    } else {
+                        println!("{name}");
+                    }
+                }
+            } else {
+                match format {
+                    Format::Json => {
+                        println!("{}", serde_json::to_string_pretty(&suggestions)?);
+                    }
+                    Format::Lines => {
+                        for candidate in suggestions {
+                            println!("{}", candidate.name);
+                        }
+                    }
+                }
+            }
         }
         Commands::Inline { left } => {
             if let Some(text) = inline::suffix(&catalog, &left, &usage) {
