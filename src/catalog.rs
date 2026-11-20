@@ -79,6 +79,15 @@ const BUILTINS: &[(&str, &str)] = &[
 ];
 
 pub fn load_catalog() -> Vec<Candidate> {
+    load_with_path(true)
+}
+
+/// For the ZLE redraw hook, avoid repeated filesystem scans of PATH.
+pub fn load_inline_catalog() -> Vec<Candidate> {
+    load_with_path(false)
+}
+
+fn load_with_path(scan_path: bool) -> Vec<Candidate> {
     let mut catalog = Vec::new();
     let mut seen = HashSet::new();
     for (value, description) in BUILTINS {
@@ -86,31 +95,33 @@ pub fn load_catalog() -> Vec<Candidate> {
     }
 
     // Discover command names without invoking any executable.
-    if let Some(paths) = env::var_os("PATH") {
-        for directory in env::split_paths(&paths) {
-            let Ok(entries) = fs::read_dir(directory) else {
-                continue;
-            };
-            for entry in entries.flatten() {
-                let Some(filename) = entry.file_name().to_str().map(str::to_owned) else {
+    if scan_path {
+        if let Some(paths) = env::var_os("PATH") {
+            for directory in env::split_paths(&paths) {
+                let Ok(entries) = fs::read_dir(directory) else {
                     continue;
                 };
-                if filename.starts_with('.') || filename.contains(char::is_whitespace) {
-                    continue;
+                for entry in entries.flatten() {
+                    let Some(filename) = entry.file_name().to_str().map(str::to_owned) else {
+                        continue;
+                    };
+                    if filename.starts_with('.') || filename.contains(char::is_whitespace) {
+                        continue;
+                    }
+                    let Ok(metadata) = fs::metadata(entry.path()) else {
+                        continue;
+                    };
+                    if !metadata.is_file() || !is_executable(&metadata) {
+                        continue;
+                    }
+                    insert(
+                        &mut catalog,
+                        &mut seen,
+                        &filename,
+                        "Executavel encontrado no PATH",
+                        "path",
+                    );
                 }
-                let Ok(metadata) = fs::metadata(entry.path()) else {
-                    continue;
-                };
-                if !metadata.is_file() || !is_executable(&metadata) {
-                    continue;
-                }
-                insert(
-                    &mut catalog,
-                    &mut seen,
-                    &filename,
-                    "Executavel encontrado no PATH",
-                    "path",
-                );
             }
         }
     }

@@ -1,6 +1,7 @@
 use crate::catalog::Candidate;
 use crate::context::{Applied, Context};
-use crate::engine::suggest;
+use crate::engine::suggest_ranked;
+use crate::usage::Usage;
 use crossterm::event::{self, Event, KeyCode, KeyEventKind, KeyModifiers};
 use crossterm::terminal::{disable_raw_mode, enable_raw_mode};
 use ratatui::backend::CrosstermBackend;
@@ -11,7 +12,11 @@ use ratatui::widgets::{Block, Borders, List, ListItem, ListState, Paragraph};
 use ratatui::{Terminal, TerminalOptions, Viewport};
 use std::io;
 
-pub fn pick(catalog: &[Candidate], context: &Context) -> io::Result<Option<Applied>> {
+pub fn pick(
+    catalog: &[Candidate],
+    context: &Context,
+    usage: &Usage,
+) -> io::Result<Option<Applied>> {
     let Some(initial) = context.query() else {
         return Ok(None);
     };
@@ -29,7 +34,7 @@ pub fn pick(catalog: &[Candidate], context: &Context) -> io::Result<Option<Appli
             return Err(error);
         }
     };
-    let result = run_loop(&mut terminal, catalog, context, initial);
+    let result = run_loop(&mut terminal, catalog, context, initial, usage);
     let _ = terminal.clear();
     drop(terminal);
     disable_raw_mode()?;
@@ -41,11 +46,12 @@ fn run_loop(
     catalog: &[Candidate],
     context: &Context,
     initial: &str,
+    usage: &Usage,
 ) -> io::Result<Option<Applied>> {
     let mut query = initial.to_owned();
     let mut selected = 0_usize;
     loop {
-        let suggestions = suggest(catalog, &query, 6);
+        let suggestions = suggest_ranked(catalog, &query, 6, usage);
         selected = if suggestions.is_empty() {
             0
         } else {

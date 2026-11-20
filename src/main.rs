@@ -1,8 +1,11 @@
+mod benchmark;
 mod catalog;
 mod completion;
 mod context;
 mod engine;
+mod inline;
 mod ui;
+mod usage;
 
 use clap::{Parser, Subcommand, ValueEnum};
 use context::Context;
@@ -11,6 +14,7 @@ use std::error::Error;
 use std::fs;
 use std::path::PathBuf;
 use std::time::Instant;
+use usage::Usage;
 
 #[derive(Parser)]
 #[command(
@@ -70,11 +74,33 @@ enum Commands {
         #[arg(long, conflicts_with = "refresh")]
         status: bool,
     },
-    /// Mede a busca apos carregar o catalogo.
+    /// Exibe apenas o sufixo seguro para POSTDISPLAY no ZLE.
+    Inline {
+        #[arg(long)]
+        left: String,
+    },
+    /// Histórico local opt-in, guardando SOMENTE templates reconhecidos.
+    Usage {
+        #[command(subcommand)]
+        action: UsageAction,
+    },
+    /// Mede busca ou compara Frizbee e Nucleo no mesmo dataset.
     Bench {
         #[arg(long, default_value_t = 200)]
         iterations: usize,
+        #[arg(long)]
+        compare: bool,
     },
+}
+
+#[derive(Subcommand)]
+enum UsageAction {
+    Record {
+        #[arg(long)]
+        line: String,
+    },
+    Status,
+    Clear,
 }
 
 #[derive(Copy, Clone, Debug, ValueEnum)]
@@ -98,7 +124,12 @@ fn context(line: Option<String>, left: Option<String>, right: String) -> Context
 
 fn main() -> Result<(), Box<dyn Error>> {
     let cli = Cli::parse();
-    let catalog = catalog::load_catalog();
+    let catalog = if matches!(&cli.command, Commands::Inline { .. }) {
+        catalog::load_inline_catalog()
+    } else {
+        catalog::load_catalog()
+    };
+    let usage = Usage::load();
     match cli.command {
         Commands::Suggest {
             line,
@@ -110,7 +141,7 @@ fn main() -> Result<(), Box<dyn Error>> {
             let context = context(line, left, right);
             let items: Vec<ContextualSuggestion> = context
                 .query()
-                .map(|query| engine::suggest(&catalog, query, limit))
+                .map(|query| engine::suggest_ranked(&catalog, query, limit, &usage))
                 .unwrap_or_default()
                 .into_iter()
                 .map(|suggestion| {
@@ -139,7 +170,7 @@ fn main() -> Result<(), Box<dyn Error>> {
             cursor_output,
         } => {
             let context = context(line, left, right);
-            if let Some(applied) = ui::pick(&catalog, &context)? {
+            if let Some(applied) = ui::pick(&catalog, &context, &usage)? {
                 if let Some(path) = output {
                     fs::write(path, applied.replacement.as_bytes())?;
                     if let Some(cursor_path) = cursor_output {
@@ -164,7 +195,38 @@ fn main() -> Result<(), Box<dyn Error>> {
             };
             println!("{}", serde_json::to_string_pretty(&report)?);
         }
-        Commands::Bench { iterations } => {
+        Commands::Inline { left } => {
+            if let Some(text) = inline::suffix(&catalog, &left, &usage) {
+                println!("{text}");
+            }
+        }
+        Commands::Usage { action } => match action {
+            UsageAction::Record { line } => {
+                if !Usage::enabled() {
+                    return Err("Opt-in required: EITA_USAGE_ENABLED=1".into());
+                }
+                let mut stats = usage;
+                if let Some(template) = stats.record(&line, &catalog) {
+                    stats.save()?;
+                    println!("{template}");
+                }
+            }
+            UsageAction::Status => {
+                println!("{}", serde_json::to_string_pretty(&usage.summary())?);
+            }
+            UsageAction::Clear => {
+                Usage::clear()?;
+                println!("Local template usage cleared");
+            }
+        },
+        Commands::Bench {
+            iterations,
+            compare,
+        } => {
+            if compare {
+                println!("{}", benchmark::compare(&catalog, iterations)?);
+                return Ok(());
+            }
             if iterations == 0 {
                 return Err("--iterations deve ser maior que zero".into());
             }

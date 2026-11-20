@@ -128,6 +128,34 @@ O caminho padrão é `~/.cache/eita/zsh-completions.json` (ou `$XDG_CACHE_HOME/e
 
 Por segurança, o indexador apenas lê arquivos locais, aplica limites de tamanho, extrai **literais simples** e não executa funções Zsh, aliases, comandos externos, `eval` ou `--help`. As completions dinâmicas, funções aninhadas e especificações muito complexas continuam sendo responsabilidade do sistema nativo de completions do Zsh. Esse recurso é um enriquecimento progressivo, não um substituto para `compinit`.
 
+## ✨ Inline e ranking local
+
+Agora há um **ghost text opt-in** (sem substituir Tab), um ranking opcional por templates
+e um benchmark comparativo de Frizbee vs Nucleo.
+
+~~~zsh
+source "$HOME/.local/share/eita/eita.plugin.zsh"
+eita-index
+eita-inline-on
+
+# Escreva "git com" no prompt e aceite com Ctrl+X Ctrl+E
+# Ctrl+Espaço continua abrindo o seletor Ratatui.
+eita-usage-on    # opcional: frequência de templates, nunca argumentos
+eita-usage-off
+eita-inline-off
+~~~
+
+Também pela CLI:
+
+~~~sh
+eita inline --left "git com"
+eita bench --iterations 1000 --compare
+eita usage status
+~~~
+
+Os dois modos são desativados por padrão. Veja o [guia de autocomplete inline](docs/INLINE.md)
+para opções de cor, hooks ZLE, segurança, limites e exemplos.
+
 ## Desenvolvimento
 
 ~~~sh
@@ -149,8 +177,10 @@ O subcomando `bench` mede somente o matcher após a construção do catálogo; n
 - [x] Parsing conservador de cursor, aspas, pipes e argumentos
 - [x] Aliases Zsh
 - [x] Indexação estática e cache das definições nativas de completion do Zsh
-- [ ] Texto fantasma e menus no próprio prompt
-- [ ] Ranking contextual por histórico, opt-in
-- [ ] Benchmark reproduzível de Frizbee, Nucleo e FZF
+- [x] Texto fantasma opcional no ZLE, com aceitação explícita
+- [ ] Menu de sugestões contínuo no próprio prompt
+- [x] Ranking por frequência de templates locais, opt-in
+- [x] Benchmark comparável Frizbee × Nucleo, com dataset idêntico
+- [ ] Benchmark CLI do FZF, latência de inicialização e memória
 
 Licença MIT.

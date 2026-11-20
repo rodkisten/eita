@@ -50,3 +50,18 @@ O `Context` reconhece separadores de comandos fora de aspas e substitui o segmen
 `eita index --refresh` atualiza um único JSON em `XDG_CACHE_HOME`, usando escrita temporária e rename; `eita index --status` exibe métricas sem reconstruir. O loader só lê versões compatíveis e falha silenciosamente para caches ausentes ou inválidos, deixando os comandos embutidos e os executáveis do PATH disponíveis normalmente.
 
 A indexação é opt-in para preservar a velocidade do shell: o widget `eita-index` fornece o `fpath` da sessão e pode ser chamado a qualquer momento. O índice não interpreta scripts, não executa `--help` e pode ignorar specs dinâmicas; a compatibilidade completa com `compinit` permanece um trabalho separado.
+
+
+## Inline e ranking
+
+`src/inline.rs` calcula sufixos por *prefixo exato*: fuzzy matching pode sugerir
+correções no picker, mas o modo ghost só completa caracteres adicionais.
+`src/usage.rs` permite registrar, sob opt-in explícito, templates do catálogo,
+sem persistir a linha completa. `src/benchmark.rs` compara Nucleo e Frizbee
+com as mesmas entradas em memória, excluindo IO, startup e renderização.
+
+O plugin ZLE usa `POSTDISPLAY` e `region_highlight` apenas quando
+`EITA_INLINE_ENABLED=1` e o cursor está ao final de `BUFFER`. O sufixo só é
+aplicado com Ctrl+X Ctrl+E. Não assume a variável de exibição quando outro
+plugin a controla; as callbacks são registradas com `add-zle-hook-widget`,
+sem substituir `compinit` ou o Tab. Veja `docs/INLINE.md`.

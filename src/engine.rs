@@ -1,4 +1,5 @@
 use crate::catalog::Candidate;
+use crate::usage::Usage;
 use frizbee::{Config, Matcher};
 use serde::Serialize;
 use std::cmp::Reverse;
@@ -13,6 +14,15 @@ pub struct Suggestion {
 
 /// Suggest full replacement lines. The picker never runs a proposed command.
 pub fn suggest(catalog: &[Candidate], line: &str, limit: usize) -> Vec<Suggestion> {
+    suggest_ranked(catalog, line, limit, &Usage::default())
+}
+
+pub fn suggest_ranked(
+    catalog: &[Candidate],
+    line: &str,
+    limit: usize,
+    usage: &Usage,
+) -> Vec<Suggestion> {
     if limit == 0 {
         return Vec::new();
     }
@@ -89,6 +99,10 @@ pub fn suggest(catalog: &[Candidate], line: &str, limit: usize) -> Vec<Suggestio
             if candidate.source == "user" {
                 score += 25;
             }
+            if candidate.source == "zsh-completion" {
+                score += 15;
+            }
+            score += usage.bonus(&candidate.value);
             score -= (label.len().saturating_sub(scoped_query.len()) as i64) / 4;
             Some(Suggestion {
                 value: candidate.value.clone(),
@@ -135,6 +149,12 @@ mod tests {
     fn bounds_results() {
         assert!(suggest(&candidates(), "", 2).len() <= 2);
         assert!(suggest(&candidates(), "git", 0).is_empty());
+    }
+
+    #[test]
+    fn maintains_exact_prefix_priority() {
+        let result = suggest(&candidates(), "git comm", 5);
+        assert!(result.first().unwrap().value.starts_with("git commit"));
     }
 
     #[test]
