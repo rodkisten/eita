@@ -49,7 +49,10 @@ const BUILTINS: &[(&str, &str)] = &[
     ("gh workflow run", "Dispara um workflow"),
     ("docker", "Gerencia containers"),
     ("docker ps", "Lista containers"),
-    ("docker compose up -d", "Inicializa servicos em segundo plano"),
+    (
+        "docker compose up -d",
+        "Inicializa servicos em segundo plano",
+    ),
     ("docker compose down", "Encerra os servicos"),
     ("docker logs -f", "Acompanha os logs"),
     ("cargo", "Gerenciador do Rust"),

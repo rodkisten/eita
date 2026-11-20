@@ -8,7 +8,11 @@ use std::fs;
 use std::time::Instant;
 
 #[derive(Parser)]
-#[command(name = "eita", version, about = "Sugestoes contextuais de comandos para Zsh")]
+#[command(
+    name = "eita",
+    version,
+    about = "Sugestoes contextuais de comandos para Zsh"
+)]
 struct Cli {
     #[command(subcommand)]
     command: Commands,
@@ -49,7 +53,11 @@ fn main() -> Result<(), Box<dyn Error>> {
     let cli = Cli::parse();
     let catalog = catalog::load_catalog();
     match cli.command {
-        Commands::Suggest { line, limit, format } => {
+        Commands::Suggest {
+            line,
+            limit,
+            format,
+        } => {
             let suggestions = engine::suggest(&catalog, &line, limit);
             match format {
                 Format::Json => println!("{}", serde_json::to_string_pretty(&suggestions)?),
@@ -73,7 +81,13 @@ fn main() -> Result<(), Box<dyn Error>> {
             if iterations == 0 {
                 return Err("--iterations deve ser maior que zero".into());
             }
-            let samples = ["git comit --am", "docker comp", "pnpm i", "got", "gh pr cre"];
+            let samples = [
+                "git comit --am",
+                "docker comp",
+                "pnpm i",
+                "got",
+                "gh pr cre",
+            ];
             let mut latencies = Vec::with_capacity(iterations);
             for index in 0..iterations {
                 let start = Instant::now();

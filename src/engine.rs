@@ -59,7 +59,11 @@ pub fn suggest(catalog: &[Candidate], line: &str, limit: usize) -> Vec<Suggestio
         (0..labels.len()).map(|index| (index, 0, false)).collect()
     } else {
         let config = Config {
-            max_typos: Some(if scoped_query.chars().count() < 3 { 0 } else { 2 }),
+            max_typos: Some(if scoped_query.chars().count() < 3 {
+                0
+            } else {
+                2
+            }),
             ..Config::default()
         };
         let mut matcher = Matcher::new(scoped_query, &config);

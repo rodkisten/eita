@@ -63,7 +63,9 @@ fn run_loop(
                     ListItem::new(Line::from(vec![
                         Span::styled(
                             suggestion.value.as_str(),
-                            Style::default().fg(Color::White).add_modifier(Modifier::BOLD),
+                            Style::default()
+                                .fg(Color::White)
+                                .add_modifier(Modifier::BOLD),
                         ),
                         Span::styled(
                             format!("  {}", suggestion.description),
@@ -106,7 +108,9 @@ fn run_loop(
                     return Ok(None);
                 }
                 KeyCode::Char(character)
-                    if !key.modifiers.intersects(KeyModifiers::CONTROL | KeyModifiers::ALT) =>
+                    if !key
+                        .modifiers
+                        .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT) =>
                 {
                     query.push(character);
                     selected = 0;
