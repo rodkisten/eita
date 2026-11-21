@@ -52,6 +52,9 @@ pub fn complete(specs: &[CommandSpec], line: &str) -> Vec<Completion> {
         let path: Vec<&str> = spec.command.split_whitespace().collect();
         if completed.len() < path.len() || completed[..path.len()] != path[..] { continue; }
         let tail = &completed[path.len()..];
+        // Parent command flags are inherited by nested subcommands.
+        // Positional values remain scoped to their declaring command.
+        let at_declared_path = tail.is_empty();
         // --flag=value: preserve the flag and complete its declared values.
         if let Some((flag_name, prefix)) = active.split_once('=') {
             if let Some(flag) = spec.flags.iter().find(|flag| flag.name == flag_name) {
@@ -81,7 +84,7 @@ pub fn complete(specs: &[CommandSpec], line: &str) -> Vec<Completion> {
                 }
             }
         }
-        if !active.starts_with('-') {
+        if at_declared_path && !active.starts_with('-') {
             for argument in &spec.arguments {
                 for value in &argument.values {
                     if value.starts_with(active) {
@@ -111,6 +114,13 @@ mod tests {
     fn flag_scope() {
         assert_eq!(complete(&fixtures(), "git commit --am")[0].value, "--amend");
         assert!(complete(&fixtures(), "git status --am").is_empty());
+    }
+    #[test]
+    fn inherits_global_flags() {
+        let specs: Vec<CommandSpec> = serde_json::from_str(r#"[{"command":"git","flags":[{"name":"--version"}]},{"command":"git commit","flags":[{"name":"--amend"}]}]"#).unwrap();
+        let values: Vec<_> = complete(&specs, "git commit --").into_iter().map(|item| item.value).collect();
+        assert!(values.contains(&"--version".to_owned()));
+        assert!(values.contains(&"--amend".to_owned()));
     }
     #[test]
     fn positional_values() {
