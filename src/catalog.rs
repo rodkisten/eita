@@ -1,4 +1,8 @@
 use std::collections::HashSet;
+use serde::{Deserialize, Serialize};
+use std::hash::{Hash, Hasher};
+use std::collections::hash_map::DefaultHasher;
+use std::time::UNIX_EPOCH;
 use std::env;
 use std::fs;
 use std::path::PathBuf;
@@ -77,6 +81,77 @@ const BUILTINS: &[(&str, &str)] = &[
     ("ssh", "Acessa servidores"),
 ];
 
+#[derive(Serialize, Deserialize)]
+struct PathCache {
+    signature: u64,
+    commands: Vec<String>,
+}
+
+fn cache_path() -> Option<PathBuf> {
+    if let Some(path) = env::var_os("EITA_CACHE_DIR") {
+        return Some(PathBuf::from(path).join("path-index.json"));
+    }
+    if let Some(path) = env::var_os("XDG_CACHE_HOME") {
+        return Some(PathBuf::from(path).join("eita/path-index.json"));
+    }
+    env::var_os("HOME").map(|home| PathBuf::from(home).join(".cache/eita/path-index.json"))
+}
+
+fn path_signature(directories: &[PathBuf]) -> u64 {
+    let mut hasher = DefaultHasher::new();
+    env::var_os("PATH").hash(&mut hasher);
+    env::var_os("FPATH").hash(&mut hasher);
+    for directory in directories {
+        directory.hash(&mut hasher);
+        if let Ok(meta) = fs::metadata(directory) {
+            meta.modified().ok().and_then(|time| time.duration_since(UNIX_EPOCH).ok())
+                .map(|time| time.as_nanos()).hash(&mut hasher);
+        }
+    }
+    hasher.finish()
+}
+
+fn discover_commands() -> Vec<String> {
+    let directories: Vec<PathBuf> = env::var_os("PATH")
+        .map(|paths| env::split_paths(&paths).collect()).unwrap_or_default();
+    let signature = path_signature(&directories);
+    let cache = cache_path();
+    if let Some(ref path) = cache {
+        if let Ok(contents) = fs::read(path) {
+            if let Ok(index) = serde_json::from_slice::<PathCache>(&contents) {
+                if index.signature == signature {
+                    return index.commands;
+                }
+            }
+        }
+    }
+    let mut commands = HashSet::new();
+    for directory in &directories {
+        let Ok(entries) = fs::read_dir(directory) else { continue };
+        for entry in entries.flatten() {
+            let Some(name) = entry.file_name().to_str().map(str::to_owned) else { continue };
+            if name.starts_with('.') || name.contains(char::is_whitespace) { continue; }
+            let Ok(metadata) = fs::metadata(entry.path()) else { continue };
+            if metadata.is_file() && is_executable(&metadata) { commands.insert(name); }
+        }
+    }
+    let mut commands: Vec<String> = commands.into_iter().collect();
+    commands.sort_unstable();
+    if let Some(path) = cache {
+        if let Some(parent) = path.parent() {
+            if fs::create_dir_all(parent).is_ok() {
+                if let Ok(bytes) = serde_json::to_vec(&PathCache { signature, commands: commands.clone() }) {
+                    let temp = path.with_extension(format!("{}.tmp", std::process::id()));
+                    if fs::write(&temp, bytes).is_ok() {
+                        let _ = fs::rename(&temp, &path);
+                    }
+                }
+            }
+        }
+    }
+    commands
+}
+
 pub fn load_catalog() -> Vec<Candidate> {
     let mut catalog = Vec::new();
     let mut seen = HashSet::new();
@@ -84,34 +159,9 @@ pub fn load_catalog() -> Vec<Candidate> {
         insert(&mut catalog, &mut seen, value, description, "builtin");
     }
 
-    // Discover command names without invoking any executable.
-    if let Some(paths) = env::var_os("PATH") {
-        for directory in env::split_paths(&paths) {
-            let Ok(entries) = fs::read_dir(directory) else {
-                continue;
-            };
-            for entry in entries.flatten() {
-                let Some(filename) = entry.file_name().to_str().map(str::to_owned) else {
-                    continue;
-                };
-                if filename.starts_with('.') || filename.contains(char::is_whitespace) {
-                    continue;
-                }
-                let Ok(metadata) = fs::metadata(entry.path()) else {
-                    continue;
-                };
-                if !metadata.is_file() || !is_executable(&metadata) {
-                    continue;
-                }
-                insert(
-                    &mut catalog,
-                    &mut seen,
-                    &filename,
-                    "Executavel encontrado no PATH",
-                    "path",
-                );
-            }
-        }
+    // Cache executable names; refresh only when PATH, FPATH or directory metadata changes.
+    for name in discover_commands() {
+        insert(&mut catalog, &mut seen, &name, "Executable discovered in PATH", "path");
     }
 
     if let Some(spec_path) = spec_file() {
