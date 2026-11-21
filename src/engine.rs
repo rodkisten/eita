@@ -109,6 +109,35 @@ pub fn suggest(catalog: &[Candidate], line: &str, limit: usize) -> Vec<Suggestio
     result
 }
 
+pub fn suggest_with_specs(
+    catalog: &[Candidate],
+    specs: &[crate::specs::CommandSpec],
+    line: &str,
+    limit: usize,
+) -> Vec<Suggestion> {
+    if limit == 0 { return Vec::new(); }
+    let mut results = suggest(catalog, line, limit);
+    let words: Vec<&str> = line.split_whitespace().collect();
+    let trailing = line.chars().last().is_some_and(char::is_whitespace);
+    let prefix = if trailing { line } else {
+        let active = words.last().copied().unwrap_or("");
+        &line[..line.len().saturating_sub(active.len())]
+    };
+    for completion in crate::specs::complete(specs, line) {
+        let value = format!("{prefix}{}", completion.value);
+        if results.iter().any(|item| item.value == value) { continue; }
+        results.push(Suggestion {
+            value,
+            description: completion.description,
+            source: "spec".to_owned(),
+            score: 5_000,
+        });
+    }
+    results.sort_by_key(|item| (Reverse(item.score), item.value.len(), item.value.clone()));
+    results.truncate(limit);
+    results
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
