@@ -71,7 +71,7 @@ fn main() -> Result<(), Box<dyn Error>> {
             }
         }
         Commands::Pick { line, output } => {
-            if let Some(value) = ui::pick(&catalog, &line)? {
+            if let Some(value) = ui::pick(&catalog, &command_specs, &line)? {
                 if let Some(path) = output {
                     fs::write(path, value.as_bytes())?;
                 } else {
