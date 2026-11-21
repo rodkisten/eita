@@ -1,6 +1,7 @@
 mod catalog;
 mod engine;
 mod specs;
+mod man;
 mod ui;
 
 use clap::{Parser, Subcommand, ValueEnum};
@@ -53,7 +54,16 @@ enum Format {
 fn main() -> Result<(), Box<dyn Error>> {
     let cli = Cli::parse();
     let catalog = catalog::load_catalog();
-    let command_specs = specs::load();
+    let mut command_specs = specs::load();
+    // Passive discovery augments static fixtures, without executing the target CLI.
+    // Only inspect the active root; avoid scanning the entire man database.
+    let active_line = match &cli.command {
+        Commands::Suggest { line, .. } | Commands::Pick { line, .. } => Some(line.as_str()),
+        Commands::Bench { .. } => None,
+    };
+    if let Some(root) = active_line.and_then(|line| line.split_whitespace().next()) {
+        command_specs.extend(man::learn(root));
+    }
     match cli.command {
         Commands::Suggest {
             line,
