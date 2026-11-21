@@ -19,17 +19,22 @@ pub fn suggest(catalog: &[Candidate], line: &str, limit: usize) -> Vec<Suggestio
     let query = line.trim_start();
     let root = query.split_whitespace().next().unwrap_or("");
     let known_root = !root.is_empty() && catalog.iter().any(|candidate| candidate.root() == root);
-    let scoped_query = if known_root {
-        query.strip_prefix(root).unwrap_or("").trim_start()
-    } else {
-        query
-    };
+    // Match the active token inside its parent command path rather than fuzzy
+    // matching the entire suffix. Preserve earlier subcommands and flags.
+    let tokens: Vec<&str> = query.split_whitespace().collect();
+    let trailing_space = query.ends_with(' ');
+    let parent_count = if trailing_space { tokens.len() } else { tokens.len().saturating_sub(1) };
+    let parent = if known_root { tokens[..parent_count].join(" ") } else { String::new() };
+    let active = if trailing_space { "" } else { tokens.last().copied().unwrap_or("") };
+    let scoped_query = if known_root { active } else { query };
 
     let pool: Vec<&Candidate> = catalog
         .iter()
         .filter(|candidate| {
             if known_root {
-                candidate.root() == root && !(query.ends_with(' ') && candidate.value == root)
+                candidate.root() == root
+                    && candidate.value != parent
+                    && (parent.is_empty() || candidate.value.starts_with(&format!("{parent} ")))
             } else {
                 !candidate.value.contains(' ')
             }
@@ -46,7 +51,7 @@ pub fn suggest(catalog: &[Candidate], line: &str, limit: usize) -> Vec<Suggestio
             if known_root {
                 candidate
                     .value
-                    .strip_prefix(root)
+                    .strip_prefix(&parent)
                     .unwrap_or("")
                     .trim_start()
             } else {
@@ -129,6 +134,18 @@ mod tests {
     fn fixes_mistyped_root() {
         let result = suggest(&candidates(), "got", 10);
         assert!(result.iter().any(|item| item.value == "git"));
+    }
+
+    #[test]
+    fn understands_nested_git_flags() {
+        let result = suggest(&candidates(), "git commit --am", 10);
+        assert_eq!(result.first().unwrap().value, "git commit --amend");
+    }
+
+    #[test]
+    fn does_not_cross_subcommand_boundaries() {
+        let result = suggest(&candidates(), "git checkout ", 10);
+        assert!(result.iter().all(|item| item.value.starts_with("git checkout ")));
     }
 
     #[test]
