@@ -94,8 +94,8 @@ Default location: `$XDG_CACHE_HOME/eita/path-index.json` or `~/.cache/eita/path-
 | Executables in `PATH` | ✅ | No executable invocation |
 | Persistent PATH index | ✅ | Fingerprint-based cache |
 | Custom TSV specs | ✅ | `command<TAB>description` |
-| Zsh aliases, functions and `fpath` definitions | 🗓️ | Shell adapter and incremental index |
-| Native `_arguments` / `compdef` specs | 🗓️ | Structured completion knowledge |
+| Passive Zsh completion file discovery | 🧪 | Reads `_command` files from `FPATH`; simple quoted option specs only |\n| Zsh aliases, functions and live `compdef` resolution | 🗓️ | Shell adapter and incremental index |
+| Full `_arguments`, `_describe` and `compdef` interpretation | 🗓️ | Requires a richer static parser |
 | Passive man-page extraction | 🧪 | Experimental: plain/gzip section 1/8 pages, simple roff flags, metadata cache |\n| Nested man-page commands and `--help` | 🗓️ | Rich parsing and trusted opt-in probing |
 | Declared positional values and flag values | ✅ | JSON schemas, static values |
 | Dynamic argument value providers | 🗓️ | Context-sensitive runtime sources |
@@ -108,6 +108,10 @@ mytool deploy --dry-run	Preview deployment
 ```
 
 Use a **literal tab** between the command and description.
+
+### 🐚 Learning from Zsh completion definitions
+
+The experimental passive reader checks `FPATH` for `_command` completion files, including one level of category subdirectories. It recognizes simple quoted option specifications such as `'--amend[Amend previous commit]'` and `'--cleanup=-[Cleanup mode]'`. It **never sources shell functions**. This is a narrow static extraction, not execution of the Zsh completion engine: dynamically generated options, `compdef` aliases, nested subcommands, `_describe` and conditional specifications are not supported yet. The file reader currently runs on each suggestion and does not yet have a dedicated persistent cache.
 
 ### 🧠 Learning from installed documentation
 
@@ -142,7 +146,7 @@ Each entry declares a full `command` path, optional `flags` with `name`, `descri
 - [ ] Cursor-aware edits preserving surrounding text, quoting and pipes
 - [ ] Unknown-command correction with ranked suggestions
 - [ ] Persistent ranking from local command history (opt-in)
-- [ ] Zsh aliases, functions, completions and `fpath` index\n- [x] Experimental gzip man-page parsing and fingerprint-based knowledge cache
+- [x] Experimental passive Zsh completion file scanning for simple quoted flags\n- [ ] Zsh aliases, functions, live `compdef` mapping and comprehensive `fpath` index\n- [x] Experimental gzip man-page parsing and fingerprint-based knowledge cache
 - [x] Structured JSON specs for command paths, flags, positional values and static flag values
 - [ ] Dynamic value providers, shell-aware quoting and fuzzy ranking for spec values
 - [ ] Background service / daemon with optional file-system notifications
