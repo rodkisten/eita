@@ -44,7 +44,7 @@ pub fn load() -> Vec<CommandSpec> {
 }
 pub fn complete(specs: &[CommandSpec], line: &str) -> Vec<Completion> {
     let words: Vec<&str> = line.split_whitespace().collect();
-    let trailing = line.ends_with(char::is_whitespace);
+    let trailing = line.chars().last().is_some_and(char::is_whitespace);
     let active = if trailing { "" } else { words.last().copied().unwrap_or("") };
     let completed = if trailing { &words[..] } else { &words[..words.len().saturating_sub(1)] };
     let mut result = Vec::new();
