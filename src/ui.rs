@@ -1,5 +1,6 @@
 use crate::catalog::Candidate;
-use crate::engine::suggest;
+use crate::engine::suggest_with_specs;
+use crate::specs::CommandSpec;
 use crossterm::event::{self, Event, KeyCode, KeyEventKind, KeyModifiers};
 use crossterm::terminal::{disable_raw_mode, enable_raw_mode};
 use ratatui::backend::CrosstermBackend;
@@ -10,7 +11,7 @@ use ratatui::widgets::{Block, Borders, List, ListItem, ListState, Paragraph};
 use ratatui::{Terminal, TerminalOptions, Viewport};
 use std::io;
 
-pub fn pick(catalog: &[Candidate], initial: &str) -> io::Result<Option<String>> {
+pub fn pick(catalog: &[Candidate], specs: &[CommandSpec], initial: &str) -> io::Result<Option<String>> {
     enable_raw_mode()?;
     let backend = CrosstermBackend::new(io::stdout());
     let mut terminal = match Terminal::with_options(
@@ -25,7 +26,7 @@ pub fn pick(catalog: &[Candidate], initial: &str) -> io::Result<Option<String>> 
             return Err(error);
         }
     };
-    let result = run_loop(&mut terminal, catalog, initial);
+    let result = run_loop(&mut terminal, catalog, specs, initial);
     let _ = terminal.clear();
     drop(terminal);
     disable_raw_mode()?;
@@ -35,12 +36,13 @@ pub fn pick(catalog: &[Candidate], initial: &str) -> io::Result<Option<String>> 
 fn run_loop(
     terminal: &mut Terminal<CrosstermBackend<io::Stdout>>,
     catalog: &[Candidate],
+    specs: &[CommandSpec],
     initial: &str,
 ) -> io::Result<Option<String>> {
     let mut query = initial.to_owned();
     let mut selected = 0_usize;
     loop {
-        let suggestions = suggest(catalog, &query, 6);
+        let suggestions = suggest_with_specs(catalog, specs, &query, 6);
         selected = if suggestions.is_empty() {
             0
         } else {
