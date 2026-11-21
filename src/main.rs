@@ -55,7 +55,8 @@ enum Format {
 fn main() -> Result<(), Box<dyn Error>> {
     let cli = Cli::parse();
     let catalog = catalog::load_catalog();
-    let mut command_specs = specs::load();
+    let fallback_specs = specs::load();
+    let mut command_specs = Vec::new();
     // Passive discovery augments static fixtures, without executing the target CLI.
     // Only inspect the active root; avoid scanning the entire man database.
     let active_line = match &cli.command {
@@ -66,6 +67,8 @@ fn main() -> Result<(), Box<dyn Error>> {
         command_specs.extend(zsh::learn(root));
         command_specs.extend(man::learn(root));
     }
+    command_specs.extend(fallback_specs);
+    let command_specs = specs::merge(command_specs);
     match cli.command {
         Commands::Suggest {
             line,
