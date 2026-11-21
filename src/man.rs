@@ -31,12 +31,12 @@ fn extract_flags(source: &str) -> Vec<FlagSpec> {
         let raw = [".B ", ".BI ", ".BR ", ".IR ", ".I ", ".TP ", ".It Fl "]
             .iter().find_map(|prefix| raw.strip_prefix(prefix));
         let Some(raw) = raw else { continue };
-        let normalized = raw.replace("\\-", "-").replace("\\fB", "").replace("\\fR", "");
+        let normalized = raw.replace(r"\-", "-").replace(r"\fB", "").replace(r"\fR", "");
         let raw = normalized.trim().trim_matches('"');
         let raw = if let Some(flag) = raw.strip_prefix("--") { format!("--{flag}") }
             else if line.trim().starts_with(".It Fl ") { format!("-{raw}") }
             else { raw.to_owned() };
-        let flag = raw.split(|c: char| c.is_whitespace() || c == '=' || c == '[' || c == ',' || c == '\\').next().unwrap_or("");
+        let flag = raw.split(|c: char| c.is_whitespace() || c == '=' || c == '[' || c == ',' || c == '\\\\').next().unwrap_or("");
         if !flag.starts_with('-') || flag.len() < 2 || !flag.trim_start_matches('-').chars().all(|c| c.is_ascii_alphanumeric() || c == '-') { continue; }
         if !flags.iter().any(|f: &FlagSpec| f.name == flag) {
             flags.push(FlagSpec { name: flag.to_owned(), description: "Discovered in local man page".into(), values: vec![], takes_value: raw.contains('=') });
