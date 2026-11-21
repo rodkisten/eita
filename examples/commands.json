@@ -1,0 +1,26 @@
+[
+  {
+    "command": "git commit",
+    "flags": [
+      {"name": "--amend", "description": "Amend the previous commit"},
+      {"name": "--cleanup", "description": "Choose commit message cleanup mode", "takes_value": true, "values": ["strip", "whitespace", "verbatim", "scissors", "default"]},
+      {"name": "--message", "description": "Use the supplied commit message", "takes_value": true},
+      {"name": "--signoff", "description": "Add a Signed-off-by trailer"}
+    ]
+  },
+  {
+    "command": "docker compose up",
+    "flags": [
+      {"name": "--detach", "description": "Run containers in the background"},
+      {"name": "--build", "description": "Build images before starting containers"},
+      {"name": "--pull", "description": "Pull images before running", "takes_value": true, "values": ["always", "missing", "never"]}
+    ]
+  },
+  {
+    "command": "gh pr list",
+    "flags": [
+      {"name": "--state", "description": "Filter pull request state", "takes_value": true, "values": ["open", "closed", "merged", "all"]},
+      {"name": "--limit", "description": "Maximum number of results", "takes_value": true}
+    ]
+  }
+]
