@@ -1,9 +1,10 @@
+use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use std::env;
 use std::fs;
 use std::path::PathBuf;
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct Candidate {
     pub value: String,
     pub description: String,
@@ -78,6 +79,19 @@ const BUILTINS: &[(&str, &str)] = &[
 ];
 
 pub fn load_catalog() -> Vec<Candidate> {
+    load_catalog_for_path(&env::var("PATH").unwrap_or_default())
+}
+
+pub fn load_catalog_for_path(path: &str) -> Vec<Candidate> {
+    load_with_path(Some(path))
+}
+
+/// For the ZLE redraw hook, avoid repeated filesystem scans of PATH.
+pub fn load_inline_catalog() -> Vec<Candidate> {
+    load_with_path(None)
+}
+
+fn load_with_path(paths: Option<&str>) -> Vec<Candidate> {
     let mut catalog = Vec::new();
     let mut seen = HashSet::new();
     for (value, description) in BUILTINS {
@@ -85,8 +99,8 @@ pub fn load_catalog() -> Vec<Candidate> {
     }
 
     // Discover command names without invoking any executable.
-    if let Some(paths) = env::var_os("PATH") {
-        for directory in env::split_paths(&paths) {
+    if let Some(paths) = paths {
+        for directory in env::split_paths(std::ffi::OsStr::new(paths)) {
             let Ok(entries) = fs::read_dir(directory) else {
                 continue;
             };
@@ -131,6 +145,46 @@ pub fn load_catalog() -> Vec<Candidate> {
                 }
             }
         }
+    }
+
+    // A ZLE adapter may export a sanitized tab-delimited list of aliases.
+    // Treat aliases as data; never evaluate or execute their expansions.
+    if let Some(path) = env::var_os("EITA_ALIASES_FILE") {
+        if let Ok(contents) = fs::read_to_string(path) {
+            for line in contents.lines() {
+                if let Some((name, description)) = line.split_once('\t') {
+                    insert(
+                        &mut catalog,
+                        &mut seen,
+                        name.trim(),
+                        description.trim(),
+                        "alias",
+                    );
+                }
+            }
+        }
+    }
+
+    // Include learned templates only when explicitly opted in; never raw commands.
+    for learned in crate::usage::Usage::load().learned() {
+        insert(
+            &mut catalog,
+            &mut seen,
+            &learned.value,
+            &learned.description,
+            &learned.source,
+        );
+    }
+
+    // Cached static Zsh definitions are data, never executed as shell code.
+    for completion in crate::completion::load() {
+        insert(
+            &mut catalog,
+            &mut seen,
+            &completion.value,
+            &completion.description,
+            &completion.source,
+        );
     }
     catalog
 }

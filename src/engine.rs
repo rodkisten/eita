@@ -1,9 +1,10 @@
 use crate::catalog::Candidate;
+use crate::usage::Usage;
 use frizbee::{Config, Matcher};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::cmp::Reverse;
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct Suggestion {
     pub value: String,
     pub description: String,
@@ -13,25 +14,57 @@ pub struct Suggestion {
 
 /// Suggest full replacement lines. The picker never runs a proposed command.
 pub fn suggest(catalog: &[Candidate], line: &str, limit: usize) -> Vec<Suggestion> {
+    suggest_ranked(catalog, line, limit, &Usage::default())
+}
+
+pub fn suggest_ranked(
+    catalog: &[Candidate],
+    line: &str,
+    limit: usize,
+    usage: &Usage,
+) -> Vec<Suggestion> {
     if limit == 0 {
         return Vec::new();
     }
     let query = line.trim_start();
-    let root = query.split_whitespace().next().unwrap_or("");
-    let known_root = !root.is_empty() && catalog.iter().any(|candidate| candidate.root() == root);
+    // Choose the deepest *complete* command path, never a fuzzy ancestor.
+    // For "git commit --a" that is "git commit", not just "git".
+    let tokens: Vec<&str> = query.split_whitespace().collect();
+    let deepest = (1..=tokens.len())
+        .rev()
+        .filter(|depth| *depth < tokens.len() || query.ends_with(char::is_whitespace))
+        .map(|depth| tokens[..depth].join(" "))
+        .find(|prefix| {
+            catalog.iter().any(|entry| {
+                entry.value == *prefix || entry.value.starts_with(&format!("{prefix} "))
+            })
+        });
+    let scoped = deepest.unwrap_or_default();
+    let known_root = !scoped.is_empty();
     let scoped_query = if known_root {
-        query.strip_prefix(root).unwrap_or("").trim_start()
+        query.strip_prefix(&scoped).unwrap_or("").trim_start()
     } else {
         query
     };
-
+    let prefix = format!("{scoped} ");
     let pool: Vec<&Candidate> = catalog
         .iter()
         .filter(|candidate| {
             if known_root {
-                candidate.root() == root && !(query.ends_with(' ') && candidate.value == root)
+                let label = candidate.value.strip_prefix(&prefix);
+                label.is_some_and(|label| {
+                    if scoped_query.starts_with('-') {
+                        // Typing a flag at this level must not fuzzy-match a subcommand.
+                        label
+                            .split_whitespace()
+                            .next()
+                            .is_some_and(|token| token.starts_with('-'))
+                    } else {
+                        true
+                    }
+                })
             } else {
-                !candidate.value.contains(' ')
+                !candidate.value.contains(' ') && candidate.root() == candidate.value
             }
         })
         .collect();
@@ -44,11 +77,7 @@ pub fn suggest(catalog: &[Candidate], line: &str, limit: usize) -> Vec<Suggestio
         .iter()
         .map(|candidate| {
             if known_root {
-                candidate
-                    .value
-                    .strip_prefix(root)
-                    .unwrap_or("")
-                    .trim_start()
+                candidate.value.strip_prefix(&prefix).unwrap_or("")
             } else {
                 candidate.value.as_str()
             }
@@ -89,6 +118,10 @@ pub fn suggest(catalog: &[Candidate], line: &str, limit: usize) -> Vec<Suggestio
             if candidate.source == "user" {
                 score += 25;
             }
+            if candidate.source == "zsh-completion" {
+                score += 15;
+            }
+            score += usage.bonus(&candidate.value);
             score -= (label.len().saturating_sub(scoped_query.len()) as i64) / 4;
             Some(Suggestion {
                 value: candidate.value.clone(),
@@ -135,6 +168,58 @@ mod tests {
     fn bounds_results() {
         assert!(suggest(&candidates(), "", 2).len() <= 2);
         assert!(suggest(&candidates(), "git", 0).is_empty());
+    }
+
+    #[test]
+    fn maintains_exact_prefix_priority() {
+        let result = suggest(&candidates(), "git comm", 5);
+        assert!(result.first().unwrap().value.starts_with("git commit"));
+    }
+
+    #[test]
+    fn targets_the_deepest_command_scope() {
+        let mut data = candidates();
+        for value in [
+            "git --version",
+            "git commit --amend",
+            "git commit --all",
+            "git checkout --ours",
+            "git commit --message=",
+        ] {
+            data.push(Candidate {
+                value: value.into(),
+                description: "test".into(),
+                source: "manpage".into(),
+            });
+        }
+        let selected = suggest(&data, "git commit --a", 20);
+        assert!(!selected.is_empty());
+        assert!(selected
+            .iter()
+            .all(|item| item.value.starts_with("git commit --")));
+        assert!(selected
+            .iter()
+            .any(|item| item.value == "git commit --amend"));
+        assert!(!selected
+            .iter()
+            .any(|item| item.value == "git checkout --ours"));
+        let root_options = suggest(&data, "git --v", 20);
+        assert!(root_options
+            .iter()
+            .all(|item| item.value.starts_with("git --")));
+        let value = suggest(&data, "git commit --mes", 10);
+        assert!(value
+            .iter()
+            .any(|item| item.value == "git commit --message="));
+    }
+
+    #[test]
+    fn does_not_assume_a_partially_typed_subcommand_is_complete() {
+        let data = candidates();
+        let selected = suggest(&data, "git com", 10);
+        assert!(selected
+            .iter()
+            .any(|item| item.value == "git commit --amend"));
     }
 
     #[test]

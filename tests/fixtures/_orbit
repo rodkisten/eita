@@ -1,0 +1,13 @@
+#compdef orbit
+# Static fixture only: no code here is evaluated by Eita
+_arguments \
+  '--verbose[Print more details]' \
+  '-q[Quiet mode]' \
+  '--output=[Output file]:path:_files'
+local -a commands
+commands=(
+  'deploy:Deploy an application'
+  'status:Show current status'
+)
+_describe 'command' commands
+eval "echo --dangerous"

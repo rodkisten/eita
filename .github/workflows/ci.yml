@@ -10,6 +10,7 @@ on:
       - rust-toolchain.toml
       - '.github/workflows/ci.yml'
       - 'integrations/zsh/**'
+      - 'tests/**'
   pull_request:
     paths:
       - '**/*.rs'
@@ -18,6 +19,7 @@ on:
       - rust-toolchain.toml
       - '.github/workflows/ci.yml'
       - 'integrations/zsh/**'
+      - 'tests/**'
   workflow_dispatch:
 
 permissions:
@@ -46,10 +48,64 @@ jobs:
       - name: Build release
         run: cargo build --release
       - name: Smoke
+        shell: bash
         run: |
-          ./target/release/eita suggest --line 'git com' --format lines | grep 'git commit'
-          ./target/release/eita suggest --line 'got' --limit 1000 --format lines | grep '^git$'
+          set -euo pipefail
+          ./target/release/eita suggest --line 'git com' --format lines | grep -F 'git commit'
+          ./target/release/eita suggest --line 'got' --limit 1000 --format lines | grep -x 'git'
+          ./target/release/eita suggest --left 'echo olá | git com' --right 'it --amend' --format lines | grep -F 'echo olá | git commit --amend'
+          ./target/release/eita suggest --left "git 'com" --format json | grep -F '[]'
+          printf 'gco\tAlias: git checkout\n' > "$RUNNER_TEMP/eita-aliases.tsv"
+          EITA_ALIASES_FILE="$RUNNER_TEMP/eita-aliases.tsv" ./target/release/eita suggest --line 'gco' --format lines | grep -x 'gco'
+          ./target/release/eita index --refresh --fpath "$GITHUB_WORKSPACE/tests/fixtures" --cache "$RUNNER_TEMP/eita-index.json" | grep -F '"candidates"'
+          ./target/release/eita index --status --cache "$RUNNER_TEMP/eita-index.json" | grep -F '"scanned_files": 1'
+          EITA_COMPLETION_CACHE="$RUNNER_TEMP/eita-index.json" ./target/release/eita suggest --line 'orbit --ver' --format lines | grep -x 'orbit --verbose'
+          EITA_COMPLETION_CACHE="$RUNNER_TEMP/eita-index.json" ./target/release/eita suggest --line 'orbit dep' --format lines | grep -x 'orbit deploy'
+          # V2 index: reuse unchanged Zsh + manpage files without rewriting disk.
+          ./target/release/eita index --refresh --fpath "$GITHUB_WORKSPACE/tests/fixtures" --man-dir "$GITHUB_WORKSPACE/tests/fixtures" --cache "$RUNNER_TEMP/eita-v2.json" > "$RUNNER_TEMP/eita-v2-first.json"
+          cat "$RUNNER_TEMP/eita-v2-first.json"
+          grep -F '"updated_files": 2' "$RUNNER_TEMP/eita-v2-first.json"
+          ./target/release/eita index --refresh --fpath "$GITHUB_WORKSPACE/tests/fixtures" --man-dir "$GITHUB_WORKSPACE/tests/fixtures" --cache "$RUNNER_TEMP/eita-v2.json" | grep -F '"unchanged": true'
+          ./target/release/eita index --refresh --fpath "$GITHUB_WORKSPACE/tests/fixtures" --man-dir "$GITHUB_WORKSPACE/tests/fixtures" --cache "$RUNNER_TEMP/eita-v2.json" | grep -F '"reused_files": 2'
+          EITA_COMPLETION_CACHE="$RUNNER_TEMP/eita-v2.json" ./target/release/eita suggest --line 'orbit --ver' --format lines | grep -x 'orbit --verbose'
+          EITA_COMPLETION_CACHE="$RUNNER_TEMP/eita-v2.json" ./target/release/eita suggest --line 'orbit de' --format lines | grep -x 'orbit deploy'
+
+          test -n "$(./target/release/eita inline --left 'git com')"
+          test -z "$(./target/release/eita inline --left 'got')"
+          EITA_USAGE_ENABLED=1 EITA_USAGE_FILE="$RUNNER_TEMP/eita-usage.json" ./target/release/eita usage record --line 'git commit -m never-persist-this'
+          test -f "$RUNNER_TEMP/eita-usage.json"
+          ! grep -F 'never-persist-this' "$RUNNER_TEMP/eita-usage.json"
+          EITA_USAGE_ENABLED=1 EITA_USAGE_FILE="$RUNNER_TEMP/eita-usage.json" ./target/release/eita usage status | grep -F 'git commit'
+          ./target/release/eita bench --iterations 25 --compare | grep -F 'nucleo-matcher'
+          ./target/release/eita popup --help | grep -F -- '--height'
+          EITA_CONFIG="$RUNNER_TEMP/eita-ui.toml" ./target/release/eita config init
+          EITA_CONFIG="$RUNNER_TEMP/eita-ui.toml" ./target/release/eita config show | grep -F 'width = 48'
+          EITA_CONFIG="$RUNNER_TEMP/eita-ui.toml" ./target/release/eita config zsh | grep -F $'EITA_KEY_POPUP_FALLBACK\t^X^P'
+          ./target/release/eita recover --word gti --symbols-file "$GITHUB_WORKSPACE/tests/fixtures/symbols.tsv" --format lines | grep -x git
+          ./target/release/eita recover --word earxh --symbols-file "$GITHUB_WORKSPACE/tests/fixtures/symbols.tsv" --format lines | grep -x search
+          ./target/release/eita recover --word EDTIOR --kind variable --symbols-file "$GITHUB_WORKSPACE/tests/fixtures/symbols.tsv" --format lines | grep -x EDITOR
+          ./target/release/eita recover --word git --symbols-file "$GITHUB_WORKSPACE/tests/fixtures/symbols.tsv" --format json | grep -F '[]'
           ./target/release/eita bench --iterations 50
+          # Learning never stores arguments and starts after repeated safe templates.
+          export EITA_USAGE_ENABLED=1
+          export EITA_USAGE_FILE="$RUNNER_TEMP/eita-learn.json"
+          printf 'git worktree add /sensitive/example\n' | ./target/release/eita usage record --stdin | grep -x 'git worktree'
+          printf 'git worktree prune /also-sensitive\n' | ./target/release/eita usage record --stdin | grep -x 'git worktree'
+          ! grep -E 'sensitive|example|also-sensitive' "$EITA_USAGE_FILE"
+          ./target/release/eita suggest --line 'git workt' --format lines | grep -x 'git worktree'
+          # Engine socket: no TCP and no unnecessary new background process.
+          export EITA_DAEMON_SOCKET="$RUNNER_TEMP/eita-daemon/engine.sock"
+          export EITA_DAEMON_ENABLED=1
+          export PATH="$GITHUB_WORKSPACE/target/release:$PATH"
+          ./target/release/eita daemon start
+          trap './target/release/eita daemon stop >/dev/null 2>&1 || true' EXIT
+          ./target/release/eita daemon status | grep -F '"pid"'
+          ./target/release/eita inline --left 'git com' | grep -x 'mit'
+          ./target/release/eita daemon bench | grep -F '"p95_us"'
+          ./target/release/eita daemon reload | grep -F 'reloaded'
+          ./target/release/eita daemon stop | grep -F 'stopping'
+          unset EITA_DAEMON_ENABLED EITA_DAEMON_SOCKET EITA_USAGE_ENABLED EITA_USAGE_FILE
+          bash tests/auto-index.sh
       - name: Check installer syntax
         run: sh -n install.sh
       - name: Check Zsh plugin syntax
@@ -57,3 +113,22 @@ jobs:
           sudo apt-get update -qq
           sudo apt-get install -y -qq zsh
           zsh -n integrations/zsh/eita.plugin.zsh
+          zsh -n tests/recover.zsh
+          # Native Zsh socket integration must run AFTER installing Zsh.
+          export EITA_DAEMON_SOCKET="$RUNNER_TEMP/eita-native/engine.sock"
+          export EITA_DAEMON_ENABLED=1
+          PATH="$GITHUB_WORKSPACE/target/release:$PATH" ./target/release/eita daemon start
+          trap './target/release/eita daemon stop >/dev/null 2>&1 || true' EXIT
+          PATH="$GITHUB_WORKSPACE/target/release:$PATH" zsh -fic '
+            source integrations/zsh/eita.plugin.zsh
+            _eita_inline_fast "git com" || return 1
+            print -r -- "$REPLY"
+          ' | grep -x mit
+          ./target/release/eita daemon stop | grep -F 'stopping'
+          unset EITA_DAEMON_ENABLED EITA_DAEMON_SOCKET
+          zsh -n integrations/zsh/eita.plugin.zsh
+          if ! PATH="$GITHUB_WORKSPACE/target/release:$PATH" zsh -fic 'source tests/recover.zsh'; then
+            echo "::error::Zsh recovery integration failed. Last 100 trace lines:"
+            PATH="$GITHUB_WORKSPACE/target/release:$PATH" zsh -fixc 'source tests/recover.zsh' 2>&1 | tail -100
+            exit 1
+          fi
