@@ -42,35 +42,62 @@ pub fn load() -> Vec<CommandSpec> {
         .and_then(|text| serde_json::from_str(&text).ok())
         .unwrap_or_default()
 }
+/// Merge identical command paths, preferring the first source (Zsh, man, fallback).
+pub fn merge(sources: impl IntoIterator<Item = CommandSpec>) -> Vec<CommandSpec> {
+    let mut merged: Vec<CommandSpec> = Vec::new();
+    for spec in sources {
+        if let Some(existing) = merged.iter_mut().find(|item| item.command == spec.command) {
+            for flag in spec.flags {
+                if let Some(current) = existing.flags.iter_mut().find(|item| item.name == flag.name) {
+                    if current.description.is_empty() { current.description = flag.description; }
+                    current.takes_value |= flag.takes_value;
+                    for value in flag.values {
+                        if !current.values.contains(&value) { current.values.push(value); }
+                    }
+                } else { existing.flags.push(flag); }
+            }
+            for argument in spec.arguments {
+                if !existing.arguments.iter().any(|item| item.name == argument.name) {
+                    existing.arguments.push(argument);
+                }
+            }
+        } else { merged.push(spec); }
+    }
+    merged
+}
+
 pub fn complete(specs: &[CommandSpec], line: &str) -> Vec<Completion> {
     let words: Vec<&str> = line.split_whitespace().collect();
     let trailing = line.chars().last().is_some_and(char::is_whitespace);
     let active = if trailing { "" } else { words.last().copied().unwrap_or("") };
     let completed = if trailing { &words[..] } else { &words[..words.len().saturating_sub(1)] };
     let mut result = Vec::new();
+    let mut seen = std::collections::HashSet::new();
+    let longest_path = specs.iter().filter_map(|spec| {
+        let path: Vec<&str> = spec.command.split_whitespace().collect();
+        (completed.len() >= path.len() && completed[..path.len()] == path[..]).then_some(path.len())
+    }).max().unwrap_or(0);
     for spec in specs {
         let path: Vec<&str> = spec.command.split_whitespace().collect();
         if completed.len() < path.len() || completed[..path.len()] != path[..] { continue; }
         let tail = &completed[path.len()..];
-        // Parent command flags are inherited by nested subcommands.
-        // Positional values remain scoped to their declaring command.
-        let at_declared_path = tail.is_empty();
-        // --flag=value: preserve the flag and complete its declared values.
         if let Some((flag_name, prefix)) = active.split_once('=') {
             if let Some(flag) = spec.flags.iter().find(|flag| flag.name == flag_name) {
                 for value in &flag.values {
                     if value.starts_with(prefix) {
-                        result.push(Completion { value: format!("{flag_name}={value}"), description: flag.description.clone() });
+                        let suggestion = format!("{flag_name}={value}");
+                        if seen.insert(suggestion.clone()) {
+                            result.push(Completion { value: suggestion, description: flag.description.clone() });
+                        }
                     }
                 }
             }
             continue;
         }
-        // A value-taking flag consumes the next token.
-        if let Some(previous) = tail.last() {
+        if let Some(previous) = completed.last() {
             if let Some(flag) = spec.flags.iter().find(|flag| flag.name == *previous && (flag.takes_value || !flag.values.is_empty())) {
                 for value in &flag.values {
-                    if value.starts_with(active) {
+                    if value.starts_with(active) && seen.insert(value.clone()) {
                         result.push(Completion { value: value.clone(), description: format!("Value for {}", flag.name) });
                     }
                 }
@@ -79,15 +106,15 @@ pub fn complete(specs: &[CommandSpec], line: &str) -> Vec<Completion> {
         }
         if active.starts_with('-') || active.is_empty() {
             for flag in &spec.flags {
-                if flag.name.starts_with(active) && !tail.contains(&flag.name.as_str()) {
+                if flag.name.starts_with(active) && !tail.contains(&flag.name.as_str()) && seen.insert(flag.name.clone()) {
                     result.push(Completion { value: flag.name.clone(), description: flag.description.clone() });
                 }
             }
         }
-        if at_declared_path && !active.starts_with('-') {
+        if path.len() == longest_path && !active.starts_with('-') {
             for argument in &spec.arguments {
                 for value in &argument.values {
-                    if value.starts_with(active) {
+                    if value.starts_with(active) && seen.insert(value.clone()) {
                         result.push(Completion { value: value.clone(), description: argument.name.clone() });
                     }
                 }
@@ -121,6 +148,14 @@ mod tests {
         let values: Vec<_> = complete(&specs, "git commit --").into_iter().map(|item| item.value).collect();
         assert!(values.contains(&"--version".to_owned()));
         assert!(values.contains(&"--amend".to_owned()));
+    }
+    #[test]
+    fn merges_sources_without_duplicate_flags() {
+        let sources: Vec<CommandSpec> = serde_json::from_str(r#"[{"command":"git","flags":[{"name":"--version","description":"Zsh"}]},{"command":"git","flags":[{"name":"--version","description":"man"},{"name":"--help"}]}]"#).unwrap();
+        let merged = merge(sources);
+        assert_eq!(merged.len(), 1);
+        assert_eq!(merged[0].flags.len(), 2);
+        assert_eq!(merged[0].flags[0].description, "Zsh");
     }
     #[test]
     fn positional_values() {
