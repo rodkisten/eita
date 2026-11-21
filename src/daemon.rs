@@ -3,6 +3,7 @@
 use crate::{
     catalog, completion, engine, inline,
     usage::{self, Usage},
+    watch,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, VecDeque};
@@ -15,6 +16,7 @@ use std::os::unix::io::AsRawFd;
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
+use std::sync::mpsc::Sender;
 use std::thread;
 use std::time::{Duration, Instant, SystemTime};
 
@@ -130,6 +132,22 @@ pub fn command(action: &str) -> Result<(), Box<dyn Error>> {
             Ok(())
         }
         "bench" => benchmark(200),
+        "sync" => {
+            let response = query(&Request {
+                op: "sync".into(),
+                input: env::var("EITA_FPATH")
+                    .or_else(|_| env::var("FPATH"))
+                    .unwrap_or_default(),
+                limit: 0,
+                path: env::var("PATH").unwrap_or_default(),
+            })
+            .ok_or("daemon offline")?;
+            if !response.ok {
+                return Err(response.output.into());
+            }
+            println!("{}", response.output);
+            Ok(())
+        }
         "start" => {
             if query(&Request {
                 op: "status".into(),
@@ -208,6 +226,8 @@ struct Engine {
     queue: VecDeque<String>,
     cache: HashMap<String, String>,
     path: String,
+    sources: watch::Sources,
+    watcher: Option<Sender<watch::Sources>>,
 }
 
 fn modified(path: &Path) -> Option<SystemTime> {
@@ -232,6 +252,8 @@ impl Engine {
             queue: VecDeque::new(),
             cache: HashMap::new(),
             path: env::var("PATH").unwrap_or_default(),
+            sources: watch::Sources::from_env(),
+            watcher: None,
         };
         engine.merge_learned();
         engine
@@ -250,7 +272,7 @@ impl Engine {
     }
 
     fn reload(&mut self) {
-        self.catalog = catalog::load_catalog();
+        self.catalog = catalog::load_catalog_for_path(&self.path);
         self.usage = Usage::load_saved();
         self.merge_learned();
         self.completion_stamp = modified(&completion::cache_path());
@@ -295,7 +317,11 @@ impl Engine {
     fn respond(&mut self, request: Request) -> Response {
         self.last_activity = Instant::now();
         self.refresh_if_stale();
-        if request.input.len() > 1024 || request.limit > 100 || request.path.len() > 4096 {
+        if request.input.len() > 3072
+            || request.limit > 100
+            || request.path.len() > 4096
+            || (request.op != "sync" && request.input.len() > 1024)
+        {
             return Response {
                 ok: false,
                 output: "request too large".into(),
@@ -325,6 +351,29 @@ impl Engine {
                 self.reload();
                 format!("reloaded {} candidates", self.catalog.len())
             }
+            "sync" => {
+                if request.path.contains(['\n', '\t']) || request.input.contains(['\n', '\t']) {
+                    return Response { ok: false, output: "invalid source paths".into() };
+                }
+                let next = watch::Sources {
+                    path: request.path,
+                    fpath: (!request.input.is_empty()).then_some(request.input),
+                    manpath: self.sources.manpath.clone(),
+                };
+                if next == self.sources {
+                    "unchanged".into()
+                } else {
+                    self.sources = next;
+                    if self.path != self.sources.path {
+                        self.path = self.sources.path.clone();
+                        self.reload();
+                    }
+                    if let Some(watcher) = &self.watcher {
+                        let _ = watcher.send(self.sources.clone());
+                    }
+                    "sources updated".into()
+                }
+            }
             "status" => serde_json::json!({
                 "pid": std::process::id(),
                 "uptime_ms": self.started.elapsed().as_millis(),
@@ -334,6 +383,9 @@ impl Engine {
                 "misses": self.misses,
                 "idle_timeout_seconds": IDLE_TIMEOUT.as_secs(),
                 "socket": runtime_path().display().to_string(),
+                "auto_index": self.watcher.is_some(),
+                "watched_path": self.sources.path.split(':').filter(|part| !part.is_empty()).count(),
+                "watched_fpath": self.sources.fpath.as_ref().map_or(0, |path| path.split(':').filter(|part| !part.is_empty()).count()),
             })
             .to_string(),
             "stop" => "stopping".into(),
@@ -366,8 +418,24 @@ pub fn serve() -> Result<(), Box<dyn Error>> {
     let listener = UnixListener::bind(&socket)?;
     fs::set_permissions(&socket, fs::Permissions::from_mode(0o600))?;
     let mut engine = Engine::new();
+    let monitor = if env::var("EITA_AUTO_INDEX_ENABLED").as_deref() != Ok("0") {
+        let handle = watch::start(engine.sources.clone());
+        engine.watcher = Some(handle.updates.clone());
+        Some(handle)
+    } else {
+        None
+    };
     let mut should_stop = false;
     while !should_stop && engine.last_activity.elapsed() < IDLE_TIMEOUT {
+        if let Some(monitor) = &monitor {
+            let mut changed = false;
+            while monitor.changes.try_recv().is_ok() {
+                changed = true;
+            }
+            if changed {
+                engine.reload();
+            }
+        }
         let mut pollfd = libc::pollfd {
             fd: listener.as_raw_fd(),
             events: libc::POLLIN,

@@ -1,91 +1,129 @@
-# 🦀 Indexação incremental do Eita
+# 📚 Indexing & Command Knowledge
 
-## Objetivo
+**Static discovery, hot suggestions.** Eita separates the expensive discovery phase from keystroke-time ranking.
 
-Construir um catálogo local de comandos, subcomandos e flags, com
-mínimo I/O durante a digitação. **A cada tecla, o Eita não lê manpages
-nem analisa scripts de completions.** Essas fontes são interpretadas
-somente no `eita index --refresh` e os candidatos ficam no cache em disco,
-carregado uma vez pelo daemon Rust.
+## Sources
 
-## Fontes e prioridade
+| Source | How it is discovered | Opt-in? | Executes code? |
+| --- | --- | --- | --- |
+| Built-in command catalogue | Curated Rust data | No | No |
+| `PATH` | Names of executable files | No | No |
+| Zsh `fpath` | Literal `_arguments` and `commands=(...)` | `eita-index` or daemon auto-index | No |
+| Manpages `.1`, `.1p`, `.8`, `.gz` | Static roff `.SH`, `.TP`, `.B`/`.BR`/`.BI` | Yes, `--man-dir` | No |
+| User `specs.tsv` | One candidate and description per tab-delimited line | Yes | No |
+| Learning | Frequency of allowlisted command shapes | Yes, `eita-learn-on` | No |
 
-| Fonte | Modo de obtenção | Segurança |
-| --- | --- | --- |
-| Zsh `fpath` | Leitura textual de `_arguments` e `commands=(...)` | Nunca executa funções |
-| Manpages `.1/.1p/.8` | Leitura roff estática, inclusive gzip | Opt-in, sem `man`/pager |
-| Templates aprendidos | Nome/verbos whitelistados no `preexec` | Sem argumentos nem segredos |
-| PATH | Apenas nomes de executáveis | Nunca roda `--help` |
-| Specs personalizadas | TSV do usuário | Somente dados |
+Dynamic completion functions are deliberately **not evaluated**, and `compinit` continues to own normal Tab completion.
 
-## Comandos de operação
+## Manual indexing
 
 ~~~zsh
-eita-index                                     # Zsh fpath (auto-exportado pelo plugin)
-eita-index --man-dir /usr/share/man            # Adiciona manpages locais
-eita index --refresh --fpath /opt/zsh/site-functions --man-dir /usr/share/man
-eita index --status                            # Exibe versão e tamanho do cache
-eita daemon reload                             # Recarrega o catálogo em RAM
+source "$HOME/.local/share/eita/eita.plugin.zsh"
+eita-index                                   # current Zsh fpath
+eita-index --man-dir /usr/share/man          # opt-in local manpages
+eita index --status                          # inspect cached file counts
+eita daemon reload                           # refresh RAM immediately
 ~~~
 
-`--man-dir` aceita caminhos separados por `:`. O indexador procura o
-diretório especificado e seus subdiretórios `man1` e `man8`. Use
-`EITA_MANPATH` para predefinir fontes locais, mas evite diretórios
-não confiáveis.
+For isolated tests:
 
-## Cache versionado
+~~~sh
+eita index --refresh --fpath /opt/completions --man-dir /opt/man \
+  --cache /tmp/eita-fixture-index.json
 
-O formato JSON `v2` contém os registros consolidados e um manifesto
-de snapshots por arquivo, com `path`, `size`, `modified_ns` e
-candidatos desse arquivo. O cache `v1` continua legível para consultas.
-A primeira reconstrução converte para `v2`.
+EITA_COMPLETION_CACHE=/tmp/eita-fixture-index.json \
+  eita suggest --line 'orbit --ver' --format lines
+~~~
 
-Cada refresh faz somente `readdir + stat` de arquivos permitidos.
-Arquivos com tamanho e timestamp idênticos reutilizam os candidatos
-já analisados; os demais são reprocessados. Um arquivo apagado sai
-do catálogo. Quando tudo está inalterado, **não há escrita de disco** e
-o daemon não é recarregado.
+The indexer accepts colon-separated paths, reads bounded source files, and writes a JSON cache with an atomic rename and permissions `0600`.
 
-Exemplo de relatório:
+## Incremental index v2
+
+Each source file snapshot contains an absolute or supplied path, size, nanosecond modification time, and parsed candidates. The manifest also persists the selected Zsh/manpage source roots for the background watcher.
+
+When `eita index --refresh` runs again:
+
+1. Discover eligible filenames and check their metadata.
+2. **Reuse** records whose file size and mtime match.
+3. **Reparse** new or changed files.
+4. **Remove** records whose files disappeared.
+5. Only write the JSON and reload the daemon if something actually changed.
+
+Example:
 
 ~~~json
 {
   "version": 2,
-  "scanned_files": 2,
-  "reused_files": 2,
+  "scanned_files": 120,
+  "reused_files": 120,
   "updated_files": 0,
   "removed_files": 0,
   "unchanged": true
 }
 ~~~
 
-Tamanho máximo do cache: 8 MiB. Fontes individuais têm limite de
-256 KiB, manpages descompactadas 512 KiB; número total de arquivos
-e candidatos também é limitado para controlar o uso de recursos.
+Existing version 1 caches remain readable; a rebuild upgrades to the current manifest. The metadata fingerprint is intentionally inexpensive, not cryptographically collision-resistant: manually refresh or clear the cache if a tool replaces content while preserving both size and timestamps.
 
-A estratégia `mtime + size` não é um hash criptográfico: alterações
-que preservem ambos podem exigir `rm ~/.cache/eita/zsh-completions.json`
-seguido de `eita-index`. A versão futura poderá usar hash incremental
-e watchers em sistema de arquivos, sem bloquear o prompt.
+## 👀 Native auto-indexing (experimental)
 
-## Privacidade e limites
+On Linux, `src/watch.rs` uses inotify directory watches with a **350 ms debounce**. It subscribes to non-recursive `PATH` directories, Zsh `fpath` directories, and opted-in manpage source folders.
 
-- O manifesto é escrito com permissões `0600`.
-- O parser de manpages entende somente alguns padrões roff; não tenta
-  reproduzir `groff`, mandoc, macros executáveis ou preprocessadores.
-- Não importa automaticamente `zsh_history`.
-- O motor de sugestões nunca executa uma conclusão selecionada.
-- Nem toda flag será encontrada; fontes imprecisas podem exigir uma
-  inspeção antes da execução pelo usuário.
+- File creation/removal/move/close-write/attribute events trigger a source-specific update.
+- PATH events invalidate the executable catalogue.
+- fpath/manpage events call the **incremental** indexer in a background worker.
+- On normal prompts, Zsh compares source-path strings in memory. Only an actual PATH/fpath change launches `eita daemon sync` asynchronously.
+- On unchanged prompts the auto-index hook performs **no filesystem scan** and **does not spawn a child process**.
+- The CLI and manual indexing remain functional if the daemon or watcher is disabled.
 
-## Benchmark
+~~~zsh
+eita-daemon-on
+eita-auto-index-on
+eita-auto-index-status
+
+# After installing a CLI tool or adding a Zsh completion:
+eita daemon status
+# If an event was missed:
+eita daemon sync
+eita-index
+~~~
+
+`eita-auto-index-off` removes the current shell's change-notification hook. A daemon that was already started with native monitoring continues watching its existing directories until it stops; use `eita daemon stop` and restart with `EITA_AUTO_INDEX_ENABLED=0` to disable background native watching entirely.
+
+**Limitations:** inotify is Linux-specific; non-Linux platforms retain explicit synchronization but no continuous native watcher. An atomic replacement of an entire watched directory may require an explicit sync/restart. inotify queue overflow recovery and monitoring multiple divergent shell environments are planned.
+
+## 🌳 Command hierarchy
+
+Candidates are represented as *complete shell-editable prefixes* with a source and description:
+
+~~~text
+git
+git commit
+git commit --amend
+git commit --message=     expects <MSG>
+git checkout --ours
+~~~
+
+During ranking, Eita identifies the **deepest recognized complete token prefix**, then restricts candidates to that subtree:
+
+- `git com` → search `git` descendants, fuzzily match `com`.
+- `git commit --a` → search `git commit` descendants; `checkout` flags are excluded.
+- `git commit --message=` → show the flag and its static argument hint when available.
+
+The current static parser can retain a trailing equals sign on an option and annotate requirements from Zsh `_arguments` or simple roff headings. It does **not** complete actual file paths, read flag values from running programs, or enumerate dynamic choices. Typed argument providers and exclusion groups are planned.
+
+## Security & limits
+
+The indexer is bounded by file count (2,500), source file size (256 KiB each), expanded manpage content (512 KiB), candidate count (20,000), and cache size (8 MiB). Nonliteral and dangerous syntax is skipped. No source code is executed.
+
+User-supplied paths are treated as data, not evaluated as shell expressions. Keep custom source folders restricted to trusted files. For detailed trust boundaries, see [SECURITY.md](../SECURITY.md).
+
+## Benchmarks
 
 ~~~zsh
 eita daemon start
-eita daemon bench         # p50/p95/p99 pelo socket
+eita daemon bench
+eita daemon status
 eita bench --iterations 500 --compare
-eita daemon status        # hits, misses e entradas do cache quente
 ~~~
 
-O primeiro benchmark mede IPC + matcher aquecido; o segundo compara
-algoritmos. Nenhum deles inclui o redraw completo do app SSH no iPhone.
+This measures hot IPC and the matcher, **not** full ZLE input-to-display latency over SSH. See [architecture](ARCHITECTURE.md) and the [roadmap](ROADMAP.md).

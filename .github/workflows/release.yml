@@ -151,7 +151,7 @@ jobs:
             gh release create "$tag" \
               --target "$COMMIT_SHA" \
               --title "Eita · ${COMMIT_SHA:0:12}" \
-              --notes "Automated build for main commit $COMMIT_SHA. Linux x86_64/ARM64 and macOS Intel/Apple Silicon. Every archive has a corresponding SHA-256 checksum." \
+              --notes "Automated build for main commit $COMMIT_SHA. Packages are published only for targets enabled by the current workflow matrix. Every archive has a matching SHA-256 checksum." \
               --latest=false
           fi
           gh release upload "$tag" dist/*.tar.gz dist/*.sha256 --clobber

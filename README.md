@@ -1,343 +1,332 @@
 # 🦀 Eita
 
-Autocomplete contextual para Zsh, escrito em Rust. Combina [Frizbee](https://github.com/saghen/frizbee), com tolerância a erros de digitação, e [Ratatui](https://ratatui.rs/), para uma interface compacta no terminal.
+**A tiny shell assistant with a rather big vocabulary.**
 
-> **Seletor opt-in:** sugestões acionadas por atalho, sem substituir completions nativas nem executar automaticamente o comando escolhido.
+Context-aware Zsh completion and typo recovery, powered by Rust, [Frizbee](https://github.com/saghen/frizbee), and [Ratatui](https://ratatui.rs). Eita learns *command shapes*, not your secrets, and keeps a warm local index ready for your next keystroke.
 
-## ⚡ Instalação pelo GitHub Release
+[![Rust CI](https://github.com/rodkisten/eita/actions/workflows/ci.yml/badge.svg)](https://github.com/rodkisten/eita/actions/workflows/ci.yml)
+[![Build & Release](https://github.com/rodkisten/eita/actions/workflows/release.yml/badge.svg)](https://github.com/rodkisten/eita/actions/workflows/release.yml)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![Rust 1.89+](https://img.shields.io/badge/Rust-1.89%2B-orange.svg)](Cargo.toml)
+[![Zsh](https://img.shields.io/badge/shell-Zsh-7257b5.svg)](integrations/zsh/eita.plugin.zsh)
 
-Depois de publicar a primeira release, instale o binário apropriado para **Linux x64/ARM64** ou **macOS Intel/Apple Silicon** com um único comando:
+> [!IMPORTANT]
+> Eita **suggests and edits**, but never executes a correction for you. It is an additive Zsh plugin, not a replacement for `compinit`, native Tab completion, or your favorite shell setup.
 
-```sh
+## ✨ The quick tour
+
+~~~console
+$ eita suggest --line 'git com' --format lines
+git commit
+git commit --amend
+
+$ eita suggest --line 'git commit --a' --format lines
+git commit --all
+git commit --amend
+
+$ gti status
+zsh: command not found: gti
+🦀 Eita: Did you mean git?
+# Choosing it queues "git status" for editing, not execution.
+~~~
+
+- 🎯 **Hierarchical completion:** `git commit --a` searches *commit flags*, not every option under `git`.
+- 🧩 **Cursor-aware replacement:** keeps pipes, prior commands, and the text to the right of the cursor intact where the parser can safely do so.
+- 👻 **Ghost text:** exact-prefix suggestions through ZLE `POSTDISPLAY`, with a custom accept key. Native Tab is untouched.
+- 🦀 **Compact Ratatui picker:** customizable width, height, colors, alignment, and keyboard shortcuts.
+- 🛟 **Typo rescue:** a real `command_not_found_handler` uses installed command/alias/function names and can restore an existing handler.
+- 🧠 **Privacy-aware learning:** opt-in frequency ranking for approved command/subcommand templates, never raw command history or arguments.
+- ⚡ **Warm Rust engine:** Unix socket, in-memory catalogue, bounded LRU cache (256 entries), and low-overhead Zsh socket integration.
+- 👀 **Event-driven discovery (Linux):** native inotify notifications for `PATH`/`fpath`, debounced before incremental indexing, with no per-prompt filesystem walk.
+- 📚 **Static knowledge:** opt-in Zsh completion and roff manpage parsing (including gzip). Reads files only, never invokes arbitrary programs.
+- 📱 **SSH/mobile friendly:** works from iPhone SSH clients, with a fallback key binding for terminals that intercept Ctrl+Space.
+
+### Table of contents
+
+[Install](#-install) · [Get started](#-get-started) · [Configuration](#-configuration) · [Auto-indexing](#-auto-indexing) · [Hierarchical completion](#-hierarchical-completion) · [Architecture](#-how-it-works) · [Performance](#-performance--benchmarks) · [Security](#-security-and-privacy) · [Roadmap](#-product-roadmap) · [Contributing](#-contributing) · [Documentation](#-documentation)
+
+## 📦 Install
+
+### Latest release from `main`
+
+~~~sh
 curl -fsSL https://raw.githubusercontent.com/rodkisten/eita/main/install.sh | sh
-```
+~~~
 
-O instalador detecta a plataforma, baixa o artefato do último release, verifica o **SHA-256**, instala o executável em `~/.local/bin/eita` e o plugin em `~/.local/share/eita/eita.plugin.zsh`. Não precisa instalar Rust.
+The installer picks a matching **published** archive, verifies SHA-256, and installs `eita` to `~/.local/bin` and the optional plugin to `~/.local/share/eita/eita.plugin.zsh`. It does **not** modify your shell startup files.
 
-**Experimente imediatamente, mesmo sem configurar o PATH:**
+### Current pull-request preview
 
-```sh
-"$HOME/.local/bin/eita" suggest --line "git comit --am"
-```
+Preview builds are published as moving prereleases, only after validation succeeds. To test PR #2:
 
-Para permitir `eita` como comando global e habilitar o atalho no Zsh, coloque no seu `~/.zshrc`:
+~~~sh
+curl -fsSL https://raw.githubusercontent.com/rodkisten/eita/main/install.sh | EITA_VERSION=pr-2 sh
+~~~
 
-```zsh
+The optional short route `https://shell.migos.club/install/eita/pr/2` depends on the separately deployed Shell Workbench router; the GitHub installer above works independently of that route.
+
+**Current CI release matrix:** portable **Linux x86-64 Musl**. GNU, ARM64, and macOS targets may appear in previous assets or docs but are *not currently enabled* in the release matrix; see [release.yml](.github/workflows/release.yml). Never assume a platform is published until its archive exists.
+
+### Build from source
+
+Requires Rust **1.89+**, Cargo, and Zsh for the optional shell integration:
+
+~~~sh
+git clone https://github.com/rodkisten/eita.git
+cd eita
+cargo build --release
+./target/release/eita suggest --line 'git com' --format lines
+~~~
+
+## 🚀 Get started
+
+Add to `~/.zshrc`:
+
+~~~zsh
 export PATH="$HOME/.local/bin:$PATH"
 source "$HOME/.local/share/eita/eita.plugin.zsh"
-```
-
-Depois, abra um novo Zsh e experimente `Ctrl+Espaço`. O plugin é opcional e o instalador não modifica `~/.zshrc` automaticamente.
-
-**Personalização e versão fixa:**
-
-Em um pipeline, as variáveis de instalação devem ser passadas ao processo `sh`:
-
-```sh
-curl -fsSL https://raw.githubusercontent.com/rodkisten/eita/main/install.sh | EITA_INSTALL_DIR="$HOME/bin" sh
-curl -fsSL https://raw.githubusercontent.com/rodkisten/eita/main/install.sh | EITA_VERSION=main-COLE_A_TAG sh
-```
-
-Para mais detalhes sobre os artefatos, confira [Builds e Releases](docs/RELEASES.md).
-
-
-### 🔗 Links curtos e previews de pull requests
-
-O [Shell Workbench](https://shell.migos.club) oferece um instalador permanente, sem precisar copiar URLs do GitHub:
-
-~~~sh
-curl -fsSL https://shell.migos.club/install/eita | sh
 ~~~
 
-O build de um PR pode ser instalado usando o número do PR, e o endereço não muda quando novos commits são enviados:
-
-~~~sh
-curl -fsSL https://shell.migos.club/install/eita/pr/2 | sh
-~~~
-
-Você também pode baixar o arquivo diretamente, sem executar o instalador:
-
-~~~sh
-curl -fL https://shell.migos.club/install/eita/pr/3/artifact -o eita-pr-3.tar.gz
-curl -fL https://shell.migos.club/install/eita/pr/3/checksum -o eita-pr-3.tar.gz.sha256
-~~~
-
-O link do arquivo binário e o link curto são publicados automaticamente em um comentário atualizado do PR quando a compilação e a verificação dos checksums terminam. Os previews são **prereleases** `pr-<número>` e não alteram o `latest` da main. Previews são removidos quando o PR é fechado. A publicação exige um PR interno ao repositório e a permissão `contents: write` do GitHub Actions.
-
-**Nota:** os links curtos dependem também da rota `/install/eita/*` publicada no repositório `rodkisten/shell`. Antes dos merges correspondentes, use o instalador via `raw.githubusercontent.com`.
-
-## Compilar a partir do código-fonte
-
-Requer Rust 1.89+ e Zsh.
-
-~~~sh
-cargo build --release
-mkdir -p "$HOME/.local/bin"
-install -m 755 target/release/eita "$HOME/.local/bin/eita"
-source integrations/zsh/eita.plugin.zsh
-~~~
-
-O binário precisa estar no seu `PATH` antes de carregar o plugin. Para iniciar o seletor, pressione **Ctrl+Espaço**. Se seu terminal não transmitir essa combinação, configure outra:
+Then open a new interactive Zsh session and choose the features you want:
 
 ~~~zsh
-bindkey '^X^P' eita-pick
+eita config init       # creates ~/.config/eita/config.toml if absent
+eita-index             # one-time local fpath index
+eita-inline-on         # opt-in ghost text
+eita-daemon-on         # optional persistent Rust engine
+eita-learn-on          # optional private template-frequency learning
+eita-keys              # inspect your active key bindings
 ~~~
 
-Cancelar com Esc preserva a linha de comando. Tab ou Enter apenas preenchem o buffer, sem executá-lo. `Ctrl+X Ctrl+P` funciona como atalho alternativo.
-
-O widget passa `LBUFFER` e `RBUFFER` ao Eita para completar o segmento atual sem apagar comandos anteriores nem o texto à direita do cursor. Ele também fornece aliases do Zsh como dados, sem executá-los.
-
-## CLI
-
-~~~sh
-eita suggest --line 'git comit --am'
-eita suggest --line 'got' --format lines
-eita pick --line 'git com'
-eita suggest --left 'echo ok | git com' --right 'it --amend' --format json
-eita bench --iterations 1000
-~~~
-
-`suggest` imprime JSON com `value`, `description`, `source`, `score`, `replacement` e `cursor`. `pick` aceita `--output /caminho` para escrever a seleção em um arquivo, usado pelo plugin ZLE.
-
-## Fontes do catálogo
-
-O Eita reúne comandos internos, executáveis no `PATH` e comandos personalizados em `~/.config/eita/specs.tsv`. Defina `EITA_SPECS` para ler outro arquivo. Cada linha tem um comando, um TAB literal e uma descrição. Veja [o exemplo](examples/specs.tsv).
-
-A descoberta no `PATH` consulta arquivos executáveis e **não executa nenhum programa**.
-
-## 🧠 Indexação das completions nativas do Zsh
-
-O Eita pode **ler as definições de completion presentes no seu próprio `fpath`**, extrair flags e subcomandos descritos literalmente em `_arguments` e em listas `commands=(...)`, e armazenar um índice local em JSON.
-
-Depois de carregar o plugin Zsh, execute:
+**Try it:** type `git com` directly at the prompt. To accept ghost text, press `Ctrl+X Ctrl+E`. To open the Ratatui picker, use `Ctrl+Space` or `Ctrl+X Ctrl+P`. None of these keys execute the selected command.
 
 ~~~zsh
-eita-index
-# Alternativa: Ctrl+X Ctrl+I no prompt interativo
+eita popup --line 'git com'          # direct interactive test, even on mobile
+eita suggest --line 'git commit --' --format lines
+eita-what 'EDTIOR' variable         # explicitly suggest EDITOR, without reading its value
+eita-recover-on                     # enable command-not-found rescue
+eita-recover-off                    # restore previous handler
 ~~~
 
-Para conferir o cache e forçar uma nova indexação:
+> [!NOTE]
+> The typo popup automatically handles **unknown commands** such as `gti`. Detecting an invalid subcommand *inside* a known tool, such as `git comit` after `git` has already launched, is still planned.
+
+## 🎛️ Configuration
+
+Configuration lives at `$XDG_CONFIG_HOME/eita/config.toml` (default `~/.config/eita/config.toml`). Override with `EITA_CONFIG`. All values are read and validated by Rust, never evaluated as shell source.
+
+~~~toml
+[popup]
+width = 44
+height = 8
+max_results = 5
+theme = "violet"           # violet | graphite | light | amber
+align = "left"            # left | center | right
+position = "auto"         # auto | above | below (within inline viewport)
+
+[keys]
+popup = "^@"
+popup_fallback = "^X^P"
+accept = "^X^E"
+reindex = "^X^I"
+
+[behavior]
+trigger = "on-error"      # on-error | manual | off
+inline = true
+auto_index = true
+~~~
 
 ~~~sh
+eita config show
+eita config zsh
+~~~
+
+**Important rendering limit:** Ratatui's current inline viewport reserves the terminal's full width. The *card* is narrow, but `above`/`below` align it within the reserved area. A true cursor-anchored overlay is on the roadmap.
+
+See [configuration](docs/CONFIGURATION.md) and [ZLE integration](docs/INLINE.md).
+
+## 👀 Auto-indexing
+
+`eita-index` still supports a full explicit refresh. With the daemon enabled, the Linux engine can now keep common sources fresh **without checking directories at every prompt**.
+
+~~~zsh
+eita-daemon-on
+eita-auto-index-on
+
+# The Zsh precmd hook compares PATH and fpath strings in memory.
+# Installing a command in a watched PATH directory triggers inotify.
+# Adding a completion in a watched fpath directory triggers a
+# debounced incremental cache refresh.
+
+eita-auto-index-status
+eita daemon sync       # manually publish this shell's PATH/FPATH
+eita daemon reload     # force RAM catalogue reload
+eita-auto-index-off    # stop this shell's PATH/fpath sync hook
+~~~
+
+Implementation notes:
+
+1. **Zsh** compares source path strings on `precmd`. When unchanged, it spawns nothing. Changed paths are communicated asynchronously.
+2. **Linux inotify** watches non-recursive source directories and debounces filesystem notifications for 350 ms. No recurring directory traversal is performed.
+3. **Incremental index v2** reuses per-file snapshots using file size and modification time; additions/removals cause targeted reparsing.
+4. **Daemon** invalidates its warm catalogue when the disk index changes or `PATH` events arrive; the regular ZLE fast path only queries memory.
+5. **Fallbacks** remain available: manual refresh, CLI matching without a daemon, and explicit `eita daemon sync` when an event is missed.
+
+Auto-indexing is **experimental**: event watching is native to Linux; on other platforms, shell path changes can still initiate explicit syncs, but there is no continuous native filesystem watch yet. Different simultaneous shells can have different `PATH` values; the current daemon uses one active environment at a time and falls back to local search when the client's `PATH` differs. Per-session catalogues are planned.
+
+Explicitly add manpages to the persisted index when desired:
+
+~~~zsh
+eita-index --man-dir /usr/share/man
 eita index --status
-eita index --refresh --fpath /usr/share/zsh/functions/Completion
-eita suggest --line "git --ver"
+eita-index --man-dir /usr/share/man   # inspect reused_files / unchanged
 ~~~
 
-O caminho padrão é `~/.cache/eita/zsh-completions.json` (ou `$XDG_CACHE_HOME/eita/zsh-completions.json`), personalizável com `EITA_COMPLETION_CACHE`. A indexação é **explícita**, para não aumentar a latência do autocomplete a cada tecla. O comando `suggest` carrega o cache automaticamente.
+Manpages remain an **opt-in** source. They are never launched or rendered with external programs.
 
-Por segurança, o indexador apenas lê arquivos locais, aplica limites de tamanho, extrai **literais simples** e não executa funções Zsh, aliases, comandos externos, `eval` ou `--help`. As completions dinâmicas, funções aninhadas e especificações muito complexas continuam sendo responsabilidade do sistema nativo de completions do Zsh. Esse recurso é um enriquecimento progressivo, não um substituto para `compinit`.
+## 🌳 Hierarchical completion
 
-## ✨ Inline e ranking local
-
-Agora há um **ghost text opt-in** (sem substituir Tab), um ranking opcional por templates
-e um benchmark comparativo de Frizbee vs Nucleo.
-
-~~~zsh
-source "$HOME/.local/share/eita/eita.plugin.zsh"
-eita-index
-eita-inline-on
-
-# Escreva "git com" no prompt e aceite com Ctrl+X Ctrl+E
-# Ctrl+Espaço continua abrindo o seletor Ratatui.
-eita-usage-on    # opcional: frequência de templates, nunca argumentos
-eita-usage-off
-eita-inline-off
-~~~
-
-Também pela CLI:
-
-~~~sh
-eita inline --left "git com"
-eita bench --iterations 1000 --compare
-eita usage status
-~~~
-
-Os dois modos são desativados por padrão. Veja o [guia de autocomplete inline](docs/INLINE.md)
-para opções de cor, hooks ZLE, segurança, limites e exemplos.
-
-## 📱 Abrir o popup no iPhone
-
-`eita inline --left 'git com'` **não é um popup**. Ele apenas retorna o
-sufixo `mit` que o ZLE pode mostrar como ghost text depois de `eita-inline-on`.
-
-Para **abrir o menu real do Ratatui** diretamente no terminal HostZera:
-
-~~~bash
-"$HOME/.local/bin/eita" popup --line 'git com'
-~~~
-
-Ou, com plugin Zsh carregado:
-
-~~~zsh
-eita-popup 'git com'
-eita-keys
-~~~
-
-Com uma linha sendo editada no Zsh, pressione **Ctrl+X, depois Ctrl+P**
-ou **Ctrl+Espaço**, se o aplicativo transmitir essa combinação.
-Dentro do seletor: ↑/↓ para escolher, Enter para aplicar e Esc para sair.
-
-O popup é **acionado sob demanda**. A ativação `eita-inline-on` mostra
-sugestões visuais no prompt, mas não abre um Ratatui modal a cada tecla.
-A viewport é compacta (8 linhas, ajustável via `--height 6..12`) para
-funcionar melhor com teclado virtual.
-
-### Debian sem GLIBC 2.39
-
-A partir deste bloco, o target Linux x64 distribuído passa a ser
-`x86_64-unknown-linux-musl`, com binário estático. O build gerado no Ubuntu
-24.04 dependia de símbolos de GLIBC indisponíveis no seu Debian.
-O instalador verifica se `eita --version` inicia antes de declarar sucesso.
-Ao instalar uma prerelease, baixe o `install.sh` da mesma branch do PR,
-porque o instalador antigo da main ainda seleciona o binário GNU.
-
-## 🧠 Correção automática de erros de digitação
-
-Quando você executa `gti status` e o Zsh não encontra `gti`,
-o Eita mostra um **popup Ratatui compacto antes do próximo prompt**,
-com os comandos mais próximos que existem na sessão atual:
+Eita recognizes the deepest known, *fully typed* command prefix:
 
 ~~~text
-zsh: command not found: gti
-🦀 Eita: 'gti' não existe. Quis dizer?
-  1  git    [command] Executável disponível no PATH
-↑↓ selecionar · Enter editar · Esc sair
+git
+ ├─ status
+ ├─ checkout
+ │   └─ --ours
+ └─ commit
+     ├─ --amend
+     ├─ --all
+     └─ --message=    expects <MSG>
 ~~~
 
-O Eita consulta **nomes reais** de executáveis no PATH, aliases, funções,
-builtins e palavras reservadas. Os nomes de variáveis também podem ser
-verificados explicitamente, mas seus valores nunca são acessados.
+When you type `git com`, Eita searches the `git` namespace. After `git commit --a`, it narrows the pool to flags attached to `git commit` and won't show unrelated flags from `git checkout`. Prefix matches and historical usage influence ranking; fuzzy matching helps with small typos.
 
-Ao escolher uma correção, o Eita coloca o comando e os argumentos originais
-com escape no próximo buffer de edição (`print -z`). **Não executa nada
-sozinho**. O erro original mantém status **127**.
+Where static Zsh or roff specs explicitly indicate a value, Eita retains the `=` suffix and shows a description such as *expects <path>* or *expects <MSG>*. It **does not** invent argument values, read secrets, or execute completion functions. True dynamic value providers, enum-aware cycling, and full shell AST parsing remain planned.
 
-### Comandos de teste
+The parser only accepts a conservative, literal subset of `_arguments`, simple command arrays, and manpage `OPTIONS` / `COMMANDS` sections. Dynamic completions remain the job of native Zsh. See [indexer details](docs/INDEXING.md).
+
+## 🧱 How it works
+
+~~~text
+Zsh / ZLE (LBUFFER + RBUFFER)
+     │
+     ├── Manual picker ──────────────> Ratatui inline card
+     │
+     ├── Command-not-found ──────────> Safe typo suggestions
+     │
+     ├── Ghost text ── zsocket ──────> Unix socket ─┐
+     │                                              │
+     └── PATH/fpath changes ── precmd ──────────────┤
+                                                    ▼
+                                        Persistent Rust engine
+                                          ├─ Frizbee ranking
+                                          ├─ hierarchical scope
+                                          ├─ 256-entry LRU
+                                          ├─ usage templates
+                                          └─ cached candidates
+                                                    ▲
+                                 Linux inotify ─────┤
+                                 incremental v2 ────┘
+                                   ├─ PATH executables
+                                   ├─ Zsh _arguments
+                                   ├─ opt-in manpages
+                                   └─ user specs.tsv
+~~~
+
+**Source map**
+
+| Source | Responsibility |
+| --- | --- |
+| `src/context.rs` | Quoting-aware, cursor-aware command segment replacement |
+| `src/engine.rs` | Frizbee matching, hierarchical scopes, ranking |
+| `src/catalog.rs` | Built-ins, executables, user specs, cached suggestions |
+| `src/completion.rs`, `src/man.rs` | Read-only static parsers and incremental JSON index |
+| `src/watch.rs` | Linux native directory notifications and debounce |
+| `src/daemon.rs` | Unix socket transport, idle shutdown, warm LRU and source syncing |
+| `src/usage.rs` | Explicit opt-in learning of safe command templates |
+| `src/ui.rs`, `src/config.rs` | Ratatui rendering and TOML configuration |
+| `integrations/zsh/eita.plugin.zsh` | ZLE widgets, hooks, ghost text, fallback controls |
+
+For protocol, data flow, and limitations, see [architecture](docs/ARCHITECTURE.md).
+
+## ⚡ Performance & benchmarks
+
+Two layers are measured separately:
 
 ~~~zsh
-source "$HOME/.local/share/eita/eita.plugin.zsh"
-eita-recover-on        # ativado automaticamente quando carrega o plugin
-gti status             # deve abrir o popup após erro
-eita-recover-off       # desliga e restaura o handler anterior
-eita-what 'EDTIOR' variable
+eita daemon start
+eita daemon status       # PID, catalogue, hits, misses, watcher state
+eita daemon bench        # p50/p95/p99 IPC + ranking (warm engine)
+eita bench --iterations 500 --compare  # Frizbee vs Nucleo matcher
+eita daemon stop
 ~~~
 
-O handler é instalado automaticamente em sessões Zsh interativas que carregam
-o plugin, a menos que você defina `EITA_RECOVER_ENABLED=0` antes do `source`.
-Se já existia `command_not_found_handler`, o Eita o preserva para quando não
-existem sugestões. Esc mantém o erro 127 sem executar comandos. Em scripts ou terminais sem TTY,
-não inicia a interface.
+An earlier GitHub runner measured **27 µs p50 / 33 µs p95 / 54 µs p99** for 200 warm socket queries. These are *historical runner observations*, not a speed guarantee. They exclude binary startup, shell redraw, network latency, Ratatui rendering, and iPhone input events. The next performance milestone is an end-to-end ZLE measurement including mobile SSH.
 
-**Variáveis:** um `$EDTIOR` inexistente costuma expandir para vazio e
-não dispara o handler de comando. Consulte com `eita-what`.
+The engine stays optional, starts on demand, and exits after approximately **15 minutes idle**. The Zsh socket path avoids a Rust process startup per keystroke; normal CLI fallback remains available.
 
-**Subcomandos:** `git comit` executa `git` normalmente e pode falhar com
-outro código. Para esse caso, continue utilizando o picker manual:
-`eita popup --line "git comit"`.
+## 🔐 Security and privacy
 
-### API Rust
+**Local first means local only.** No network API, cloud learning, telemetry, remote execution, or shell-history import.
 
-~~~sh
-eita recover --word gti --symbols-file symbols.tsv --format json
-eita recover --word '$EDTIOR' --kind variable --symbols-file symbols.tsv
-eita recover --word gti --popup --symbols-file symbols.tsv --height 8
-~~~
+- Eita never executes a suggested correction.
+- Learning is **opt-in** (`eita-learn-on`) and stores a small allowlist of command/subcommand templates only. Raw arguments, hosts, paths, variables, and messages are not stored.
+- Zsh symbols are passed by *name*, not by alias/function bodies or variable values.
+- Static completion and manpage sources are read as bounded data, never evaluated or invoked.
+- The daemon binds a user-owned Unix socket in a restricted directory (0700); socket permissions are 0600.
+- Request sizes, read/write timeouts, source file sizes, cache sizes, and candidate counts have limits.
+- Check the selected text before pressing Enter. Fuzzy suggestions are not security decisions.
+- Install scripts verify archive checksums. For high-assurance installation, inspect the shell script and pin a release tag and checksum.
 
-`symbols.tsv` possui linhas `tipo<TAB>nome<TAB>descrição` e é criado
-temporariamente pelo plugin. O ranking usa distância de edição
-**Optimal String Alignment** (substituição, inserção, remoção e
-transposição adjacente), bônus por tipo, limites conservadores de distância
-e remoção de duplicatas. Nunca executa funções, aliases ou comandos
-durante a coleta dos nomes.
+Read [SECURITY.md](SECURITY.md) before reporting a vulnerability.
 
-O Ratatui usa uma viewport inline **entre a mensagem de erro e o próximo
-prompt**, preservando o scrollback. Ele não é um overlay gráfico fixo
-no topo da tela do iPhone.
+## 🗺️ Product roadmap
 
-## 🎛️ Popup personalizável
+We separate **shipped**, **experimental**, and **planned** work explicitly, so this document never presents a mockup as a feature.
 
-~~~sh
-eita config init             # cria ~/.config/eita/config.toml
-eita config show             # opções efetivas
-eita popup --line 'git com'  # caixa visualmente compacta, tema editável
-~~~
+| Area | Status | Remaining work |
+| --- | --- | --- |
+| Cursor-aware command suggestions and typo recovery | ✅ Shipped | Better nested shell syntax and typo recovery for tool-specific subcommands |
+| Compact Ratatui picker, themes, keybindings | ✅ Shipped | Real cursor-anchored overlay above/below the prompt |
+| Opt-in ZLE ghost text and safe usage templates | ✅ Shipped | Asynchronous redraw and richer opt-in ranking controls |
+| Warm Rust daemon and 256-entry LRU | ✅ Shipped | Multi-session environment isolation, persistent socket connections |
+| Incremental Zsh + manpage index | ✅ Shipped | Content hashes, richer grammar, coverage reporting |
+| Linux inotify + PATH/fpath auto-sync | 🧪 Experimental | Watch recreation, resync after missed events, macOS native watcher |
+| Hierarchical subcommand/flag ranking | 🧪 Experimental | Typed argument providers, option groups, mutually exclusive flags |
+| Manpage argument hints | 🧪 Experimental | Extract structured enums, files, and value constraints |
+| Full ZLE-to-screen benchmark | 🗓️ Planned | p50/p95/p99 on iPhone SSH terminals, CPU and memory budgets |
+| Advanced shell adapters | 🗓️ Planned | Other shells, optional Fish/Bash integrations, accessibility audit |
 
-Configure largura, altura, tema, alinhamento, atalhos e gatilho automático
-pelo arquivo TOML. Veja [configuração e atalhos](docs/CONFIGURATION.md).
-O serviço local de sugestões e aprendizado está documentado em
-[Aprendizado e cache quente](docs/DAEMON.md).
+See the [detailed engineering roadmap](docs/ROADMAP.md) for acceptance criteria, milestones, dependencies, and design constraints.
 
-## ⚡ Engine persistente + aprendizado seguro
+## 🤝 Contributing
 
-~~~zsh
-source "$HOME/.local/share/eita/eita.plugin.zsh"
-eita-daemon-on    # inicia processo Rust local com socket Unix
-eita-inline-on    # texto fantasma via socket (sem binário por tecla)
-eita-learn-on     # aprende apenas templates permitidos, sem argumentos
-eita daemon status
-eita daemon bench
-~~~
-
-O motor mantém catálogo na RAM, LRU de 256 consultas, invalidação por
-mtime de caches e desligamento após 15 minutos ociosos. Todas as operações
-funcionam sem o daemon, com fallback. Para detalhes de privacidade,
-operações, segurança e limites, veja
-[Aprendizado e cache quente](docs/DAEMON.md).
-
-## 🧭 Aprendizado de flags e índice incremental
-
-O índice agora usa snapshots de arquivos (tamanho + mtime em nanossegundos)
-para **reaproveitar fontes não alteradas**, detectar arquivos novos/removidos
-e evitar reescrever o cache quando nada mudou. A saída de indexação mostra
-`reused_files`, `updated_files`, `removed_files` e `unchanged`.
-
-~~~zsh
-# Indexar definições Zsh e manpages explicitamente autorizadas:
-eita-index --man-dir /usr/share/man
-# Verificar estado sem reconstruir:
-eita index --status
-# Consultar flags e subcomandos aprendidos:
-eita suggest --line 'git commit --' --format lines
-~~~
-
-As páginas de manual `.1`, `.1p` e `.8`, inclusive `.gz`, são
-lidas como texto roff **sem executar man, pagers, shell ou os comandos**.
-A leitura é conservadora: somente padrões estáticos `.SH OPTIONS`,
-`.SH COMMANDS`, `.TP` e `.B`/`.BR`/`.BI`. Documentos complexos podem
-exigir o índice de completions Zsh para cobertura maior. A indexação
-de manpages é **opt-in** via `--man-dir` ou `EITA_MANPATH`.
-
-Para documentação, segurança e exemplos completos, consulte
-[Índice incremental](docs/INDEXING.md). O daemon faz `reload` quando
-uma reconstrução efetivamente altera o cache.
-
-## Desenvolvimento
+Contributions are welcome, especially parser fixtures, performance measurements, Zsh compatibility fixes, and careful UX improvements for small terminals. Please read [CONTRIBUTING.md](CONTRIBUTING.md) for setup, workflow, code style, tests, security, and PR expectations.
 
 ~~~sh
 cargo fmt --all -- --check
 cargo clippy --all-targets -- -D warnings
 cargo test --all-targets
 cargo build --release
+zsh -n integrations/zsh/eita.plugin.zsh
 ~~~
 
-O subcomando `bench` mede somente o matcher após a construção do catálogo; não inclui inicialização do binário, I/O do shell e renderização. Veja a [arquitetura](docs/ARCHITECTURE.md).
+**Please do not** add code that evaluates third-party completion files, logs raw commands, intercepts native Tab by default, or spawns long-running background processes without bounded lifecycle controls.
 
-## Roteiro
+## 📚 Documentation
 
-- [x] CLI e catálogo combinado (builtin, PATH, TSV)
-- [x] Busca fuzzy tolerante a pequenos erros
-- [x] Seletor Ratatui inline, navegação e cancelamento
-- [x] Plugin ZLE opt-in
-- [x] CI, smoke tests e benchmark local
-- [x] Parsing conservador de cursor, aspas, pipes e argumentos
-- [x] Aliases Zsh
-- [x] Indexação estática e cache das definições nativas de completion do Zsh
-- [x] Texto fantasma opcional no ZLE, com aceitação explícita
-- [ ] Menu de sugestões contínuo no próprio prompt
-- [x] Correções de comandos inexistentes com popup e símbolos reais do Zsh
-- [x] Ranking por frequência de templates locais, opt-in
-- [x] Benchmark comparável Frizbee × Nucleo, com dataset idêntico
-- [ ] Benchmark CLI do FZF, latência de inicialização e memória
+- [Architecture](docs/ARCHITECTURE.md): data flow, native watchers, socket protocol, and trust boundaries.
+- [Configuration](docs/CONFIGURATION.md): TOML options, themes, shortcuts, and inline viewport limitations.
+- [Incremental indexing](docs/INDEXING.md): cache v2, source discovery, static parsers, and refresh behavior.
+- [Daemon and learning](docs/DAEMON.md): IPC, privacy model, cache behavior, benchmarks.
+- [ZLE interaction](docs/INLINE.md): ghost text, hooks, cursor safety.
+- [Builds and releases](docs/RELEASES.md): artifacts, checksums, and PR previews.
+- [Engineering roadmap](docs/ROADMAP.md): what comes next.
+- [Security policy](SECURITY.md): responsible reporting and security guarantees.
+- [Contributing](CONTRIBUTING.md): development and PR process.
 
-Licença MIT.
+## ❤️ Credits & license
+
+Built with [Frizbee](https://github.com/saghen/frizbee), [Nucleo Matcher](https://github.com/helix-editor/nucleo), [Ratatui](https://ratatui.rs/), and the Zsh Line Editor. Eita is available under the [MIT License](LICENSE).
+
+*One less typo. One more happy terminal. 🦀*

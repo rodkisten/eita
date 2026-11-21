@@ -105,6 +105,7 @@ jobs:
           ./target/release/eita daemon reload | grep -F 'reloaded'
           ./target/release/eita daemon stop | grep -F 'stopping'
           unset EITA_DAEMON_ENABLED EITA_DAEMON_SOCKET EITA_USAGE_ENABLED EITA_USAGE_FILE
+          bash tests/auto-index.sh
       - name: Check installer syntax
         run: sh -n install.sh
       - name: Check Zsh plugin syntax

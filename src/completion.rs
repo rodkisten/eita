@@ -34,6 +34,10 @@ struct Index {
     records: Vec<Candidate>,
     #[serde(default)]
     files: Vec<Snapshot>,
+    #[serde(default)]
+    fpath: Option<String>,
+    #[serde(default)]
+    manpath: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -74,6 +78,17 @@ pub fn load() -> Vec<Candidate> {
         Ok(index) if index.version == FORMAT_VERSION || index.version == 1 => index.records,
         _ => Vec::new(),
     }
+}
+
+/// Return original index roots without rescanning any source directories.
+pub fn indexed_sources() -> (Option<String>, Option<String>) {
+    let path = cache_path();
+    let bytes = fs::metadata(&path)
+        .ok()
+        .filter(|meta| meta.len() <= MAX_CACHE_BYTES)
+        .and_then(|_| fs::read(path).ok());
+    let index = bytes.and_then(|bytes| serde_json::from_slice::<Index>(&bytes).ok());
+    index.map_or((None, None), |index| (index.fpath, index.manpath))
 }
 
 pub fn status(path: &Path) -> Result<IndexReport, Box<dyn Error>> {
@@ -177,24 +192,29 @@ pub fn rebuild(
     man_override: Option<&str>,
     destination: &Path,
 ) -> Result<IndexReport, Box<dyn Error>> {
-    let fpath = fpath_override
-        .map(str::to_owned)
-        .or_else(|| env::var("EITA_FPATH").ok())
-        .or_else(|| env::var("FPATH").ok());
-    // Manpage indexing is explicitly enabled; never run arbitrary binaries.
-    let manpath = man_override
-        .map(str::to_owned)
-        .or_else(|| env::var("EITA_MANPATH").ok());
-    if fpath.is_none() && manpath.is_none() {
-        return Err("No FPATH or man directory; pass --fpath or --man-dir".into());
-    }
-
     let old: Option<Index> = fs::metadata(destination)
         .ok()
         .filter(|meta| meta.len() <= MAX_CACHE_BYTES)
         .and_then(|_| fs::read(destination).ok())
         .and_then(|bytes| serde_json::from_slice(&bytes).ok())
         .filter(|index: &Index| index.version == FORMAT_VERSION);
+    let fpath = fpath_override
+        .map(str::to_owned)
+        .or_else(|| env::var("EITA_FPATH").ok())
+        .or_else(|| env::var("FPATH").ok())
+        .or_else(|| old.as_ref().and_then(|cache| cache.fpath.clone()));
+    // Preserve explicit manpage opt-in in the index across future auto refreshes.
+    let manpath = man_override
+        .map(str::to_owned)
+        .or_else(|| env::var("EITA_MANPATH").ok())
+        .or_else(|| old.as_ref().and_then(|cache| cache.manpath.clone()));
+    let sources_unchanged = old
+        .as_ref()
+        .is_some_and(|cached| cached.fpath == fpath && cached.manpath == manpath);
+    if fpath.is_none() && manpath.is_none() {
+        return Err("No FPATH or man directory; pass --fpath or --man-dir".into());
+    }
+
     let old_count = old.as_ref().map_or(0, |index| index.files.len());
     let previous: HashMap<String, Snapshot> = old
         .map(|index| {
@@ -262,7 +282,7 @@ pub fn rebuild(
         .filter(|key| !seen_paths.contains(*key))
         .count();
     let scanned = files.len();
-    let unchanged = updated == 0 && removed == 0 && old_count == scanned;
+    let unchanged = updated == 0 && removed == 0 && old_count == scanned && sources_unchanged;
     if unchanged {
         return Ok(report(
             destination,
@@ -281,6 +301,8 @@ pub fn rebuild(
         scanned,
         records: all_records,
         files,
+        fpath,
+        manpath,
     };
     if let Some(parent) = destination.parent() {
         fs::create_dir_all(parent)?;
@@ -371,7 +393,7 @@ fn parse_source(filename: &str, source: &str) -> Vec<Candidate> {
                     for command in &commands {
                         result.push(Candidate {
                             value: format!("{command} {flag}"),
-                            description: description.to_owned(),
+                            description: description.clone(),
                             source: "zsh-completion".to_owned(),
                         });
                     }
@@ -413,27 +435,58 @@ fn valid_name(name: &str) -> bool {
         && !name.starts_with('-')
 }
 
-fn option_spec(literal: &str) -> Option<(&str, &str)> {
+// Static _arguments subset: --output=[description]:label:_files.
+// No function evaluation or shell execution.
+fn option_spec(literal: &str) -> Option<(String, String)> {
     let mut spec = literal.trim().trim_start_matches(['+', '*']);
     if spec.starts_with('(') {
         spec = spec.split_once(')')?.1;
     }
     let (before, rest) = spec.split_once('[')?;
-    let description = rest.split_once(']')?.0.trim();
-    let flag = before.trim_end_matches(['!', '+', '-', '=']);
-    if !flag.starts_with('-') || flag.len() < 2 || flag.len() > 64 {
-        return None;
-    }
-    if !flag[1..]
-        .chars()
-        .all(|ch| ch.is_ascii_alphanumeric() || ch == '-')
+    let (description, tail) = rest.split_once(']')?;
+    let description = description.trim();
+    let name = before.trim_end_matches(['!', '+', '-']);
+    let requires_value = name.ends_with('=') || (tail.starts_with(':') && !tail.starts_with("::"));
+    let flag = name.trim_end_matches('=');
+    if !flag.starts_with('-')
+        || flag.len() < 2
+        || flag.len() > 64
+        || !flag[1..]
+            .chars()
+            .all(|ch| ch.is_ascii_alphanumeric() || ch == '-')
     {
         return None;
     }
-    if description.is_empty() || description.len() > 160 {
+    if description.is_empty()
+        || description.len() > 160
+        || description.chars().any(char::is_control)
+        || literal.contains(['$', '\u{60}'])
+    {
         return None;
     }
-    Some((flag, description))
+    let mut help = description.to_owned();
+    if requires_value {
+        let kind = tail
+            .trim_start_matches(':')
+            .split(':')
+            .next()
+            .unwrap_or("value");
+        let kind = if kind.len() <= 20
+            && !kind.is_empty()
+            && kind
+                .chars()
+                .all(|ch| ch.is_ascii_alphanumeric() || ch == '-')
+        {
+            kind
+        } else {
+            "value"
+        };
+        help.push_str(&format!(" · expects <{kind}>"));
+    }
+    Some((
+        format!("{flag}{}", if name.ends_with('=') { "=" } else { "" }),
+        help,
+    ))
 }
 
 fn subcommand_spec(literal: &str) -> Option<(&str, &str)> {
@@ -562,6 +615,20 @@ mod tests {
     fn load_records(path: &Path) -> Vec<Candidate> {
         let encoded = fs::read(path).unwrap();
         serde_json::from_slice::<Index>(&encoded).unwrap().records
+    }
+
+    #[test]
+    fn preserves_flags_that_require_a_value() {
+        let found = parse_source("_orbit", FIXTURE);
+        let output = found
+            .iter()
+            .find(|item| item.value == "orbit --output=")
+            .unwrap();
+        assert!(output.description.contains("expects <path>"));
+        assert!(option_spec("--evil[Injected]$(touch /tmp/hacked)").is_none());
+        let flag = option_spec("--format[Select format]:format:(json yaml)").unwrap();
+        assert_eq!(flag.0, "--format");
+        assert!(flag.1.contains("expects <format>"));
     }
 
     #[test]

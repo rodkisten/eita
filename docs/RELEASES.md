@@ -1,96 +1,61 @@
-# 📦 Builds, artefatos e GitHub Releases
+# 📦 Releases, PR Previews & Installation
 
-## Quando acontece?
+## CI gates
 
-O workflow [📦 Eita · Build & Release](../.github/workflows/release.yml) é executado:
+GitHub Actions runs format checks, Clippy with `-D warnings`, unit tests, Zsh syntax/integration checks, installer syntax, and source/build smoke tests before releasing an archive.
 
-- Após **todo push na branch `main`**, sem filtro de caminhos. Até um commit apenas no README gera release.
-- Manualmente em **Actions → 📦 Eita · Build & Release → Run workflow → main**.
+The release pipeline is in [`.github/workflows/release.yml`](../.github/workflows/release.yml). It runs for every commit on `main`, on manual dispatch, and for open PR builds. Stable releases publish only from `main`, while repository-internal PRs can publish moving prereleases.
 
-**Importante:** o workflow só publica a partir da `main`. Execuções manuais com outra branch selecionada são ignoradas por segurança. Releases estáveis são publicadas apenas a partir da `main`.
+## Current distribution target
 
-## Plataformas e artefatos
+**Enabled in the current release matrix:** `x86_64-unknown-linux-musl` (portable x86-64 Linux, including modern Debian systems without relying on a recent host glibc).
 
-| Arquivo | Runner | Sistema |
-| --- | --- | --- |
-| `eita-x86_64-unknown-linux-gnu.tar.gz` | `ubuntu-24.04` | Linux x86-64 |
-| `eita-aarch64-unknown-linux-gnu.tar.gz` | `ubuntu-24.04-arm` | Linux ARM64 |
-| `eita-x86_64-apple-darwin.tar.gz` | `macos-15-intel` | macOS Intel |
-| `eita-aarch64-apple-darwin.tar.gz` | `macos-15` | macOS Apple Silicon |
+The workflow contains commented examples for ARM64 and macOS, but these are **not enabled targets** and should not be advertised as already built. The matrix controls actual availability.
 
-Cada arquivo `.tar.gz` contém `eita`, `README.md`, `LICENSE` e `integrations/zsh/eita.plugin.zsh`. Cada archive possui um `.tar.gz.sha256` correspondente.
+Each published archive contains:
 
-O workflow sobe os pacotes como **Actions artifacts** (retenção de 30 dias) e publica os pares arquivo/checksum dos targets habilitados no GitHub Release, acessível em [Releases](https://github.com/rodkisten/eita/releases). Linux usa o target GNU da distribuição e pode exigir uma versão compatível de glibc. Compatibilidade com musl/Alpine não está garantida.
+~~~text
+eita
+integrations/zsh/eita.plugin.zsh
+README.md
+LICENSE
+~~~
 
-## Tags e `latest`
+Every `.tar.gz` is accompanied by a `.tar.gz.sha256` file. The pipeline validates checksum pairs before publication. Artifacts are also retained in Actions for 30 days.
 
-Cada SHA gera `main-<12 primeiros caracteres do commit>`. Executar manualmente o mesmo commit reaproveita o release e substitui os assets, sem gerar uma segunda tag. Um release antigo nunca assume o `latest` quando já existe um commit mais novo na main: somente uma execução correspondente ao HEAD atual pode promover o release.
+## Stable releases
 
-## Instalação
+A `main` SHA produces a tag `main-<first 12 sha characters>`. When the workflow runs again for the same SHA, it can update the corresponding release. Only the current `main` HEAD may be promoted to `latest`.
 
 ~~~sh
 curl -fsSL https://raw.githubusercontent.com/rodkisten/eita/main/install.sh | sh
 "$HOME/.local/bin/eita" --version
-"$HOME/.local/bin/eita" suggest --line 'git comit'
 ~~~
 
-Para instalar uma versão específica, copie sua tag em [Releases](https://github.com/rodkisten/eita/releases):
+The installer validates the downloaded checksum and installs without Rust, GitHub CLI, jq, or sudo. It does not modify `~/.zshrc` or PATH for you. For isolated installs, use `EITA_INSTALL_DIR` and `EITA_PLUGIN_DIR`.
+
+## Pull-request previews
+
+Successful PR builds publish or update a moving `pr-N` tag and a matching GitHub prerelease, without promoting it to `latest`. A bot comment on the PR contains installation/download links.
 
 ~~~sh
-curl -fsSL https://raw.githubusercontent.com/rodkisten/eita/main/install.sh | EITA_VERSION=main-EXEMPLO sh
-~~~
-
-Outras variáveis: `EITA_INSTALL_DIR` (diretório do executável), `EITA_PLUGIN_DIR` (diretório para o plugin). Os defaults são `~/.local/bin` e `${XDG_DATA_HOME:-$HOME/.local/share}/eita`. O instalador verifica SHA-256, usa HTTPS e falha quando o archive não coincide com seu checksum. Não altera `PATH` ou `.zshrc` automaticamente.
-
-
-## 🔗 Builds de PR e links curtos
-
-A pipeline também roda em PRs e publica uma **prerelease mutável** `pr-<número>` quando todos os builds passam. O PR recebe ou atualiza um único comentário contendo o instalador e os links de download.
-
-~~~sh
-# Estável da main
-curl -fsSL https://shell.migos.club/install/eita | sh
-
-# Build mais recente do PR #2
-curl -fsSL https://shell.migos.club/install/eita/pr/2 | sh
-
-# Alternativa sem domínio próprio (após o preview existir)
 curl -fsSL https://raw.githubusercontent.com/rodkisten/eita/main/install.sh | EITA_VERSION=pr-2 sh
 ~~~
 
-Para baixar o pacote diretamente com um link estável de PR, sem executar nada:
+Optional Shell Workbench shortcuts exist **only when that external router is deployed**:
 
 ~~~sh
-curl -fL https://shell.migos.club/install/eita/pr/3/artifact -o eita.tar.gz
-curl -fL https://shell.migos.club/install/eita/pr/3/checksum -o eita.tar.gz.sha256
+curl -fsSL https://shell.migos.club/install/eita/pr/2 | sh
 ~~~
 
-O link aceita `?target=aarch64-unknown-linux-gnu` (ou uma das arquiteturas disponibilizadas pela matriz); binários ausentes retornarão 404 no GitHub.
+The raw GitHub installer and direct prerelease assets remain the independent fallback. A prerelease is removed when its PR closes; do not use moving PR tags as long-term reproducibility pins.
 
-A rota curta `/install/eita` é implementada pelo Cloudflare Worker do repositório `rodkisten/shell`; a variante `/pr/N` prefixa a variável de ambiente `EITA_VERSION=pr-N` antes de executar o instalador oficial. Os previews são públicos, **não são promovidos à release estável**, e são apagados quando o PR fecha.
+## Integrity, platform notes & source
 
-Os arquivos comuns do GitHub Actions continuam disponíveis durante o período de retenção, mas não são usados como URL pública estável porque exigem autenticação ou expiram. Publicar como prerelease torna o download compatível com `curl`.
+- Linux builds use the statically linked Musl target and verify the executable ELF does not require a dynamic interpreter.
+- The installer checks archives using SHA-256, but a checksum published beside an archive is **not** a signed supply-chain attestation.
+- If an archive for your OS/architecture is absent, the installer fails instead of silently selecting a different target.
+- Inspect the installer and pin release SHA/assets for sensitive environments.
+- Format, tests, and runtime behavior on other platforms must be validated before enabling the target matrix.
 
-**Cobertura de plataformas:** o workflow distribui somente os targets atualmente habilitados na matriz de `release.yml`. Adicionar um novo target à matriz passa a produzir seu artefato de forma automática; a validação compara a quantidade de arquivos e checksums antes de publicar.
-
-## Segurança e validação
-
-- Cargo fmt, Clippy e testes devem passar antes da compilação dos quatro targets.
-- Os jobs que publicam releases da `main` e previews usam `contents: write`; o preview aceita somente PRs originados do mesmo repositório.
-- A publicação exige um arquivo SHA-256 válido para cada tarball dos targets efetivamente habilitados.
-- O instalador não depende de Rust, gh CLI, jq ou sudo.
-- A interface interativa depende de Zsh e terminal compatível; o binário CLI pode ser chamado diretamente.
-
-
-## 🛠️ Build Linux portátil para Debian
-
-O arquivo Linux x64 agora usa o target `x86_64-unknown-linux-musl`.
-A pipeline instala `musl-tools` e compila com Rust para Musl,
-eliminando a dependência da GLIBC do sistema.
-O smoke test verifica a ausência do segmento `INTERP` no ELF
-e executa o binário no runner.
-
-O instalador Linux escolhe o archive Musl e deve encerrar com erro
-se a execução de `eita --version` falhar. Prévia do PR:
-execute o instalador da branch que contém essa mudança, não o
-`install.sh` ainda antigo na `main`.
+See the [README](../README.md) and [CONTRIBUTING](../CONTRIBUTING.md) guides for development and release workflow conventions.

@@ -30,7 +30,19 @@ fn valid_name(name: &str) -> bool {
 }
 
 fn option(value: &str) -> bool {
-    let value = value.trim_end_matches(['=', ',', ':']);
+    let value = value.trim_end_matches([',', ':']);
+    let value = if let Some((flag, argument)) = value.split_once('=') {
+        if argument.len() > 24
+            || !argument
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || c == '-')
+        {
+            return false;
+        }
+        flag
+    } else {
+        value.trim_end_matches('=')
+    };
     let short = value.starts_with('-') && value.len() == 2;
     let long = value.starts_with("--") && value.len() >= 4;
     (short || long)
@@ -49,7 +61,7 @@ fn token(raw: &str) -> Option<String> {
         .split_whitespace()
         .next()?
         .trim_matches(['"', '\'', ',', '.'])
-        .trim_end_matches(['=', ':']);
+        .trim_end_matches(':');
     if item.is_empty() || item.len() > 72 || item.contains(['\\', '{', '}', '$']) {
         return None;
     }
@@ -114,6 +126,23 @@ pub fn parse(filename: &str, source: &str) -> Vec<Candidate> {
             continue;
         }
         if let (Some(name), Some(description)) = (pending.take(), prose(line)) {
+            let (name, description) = if let Some((flag, hint)) = name.split_once('=') {
+                let safe =
+                    hint.len() <= 24 && hint.chars().all(|c| c.is_ascii_alphanumeric() || c == '-');
+                if safe && name.starts_with('-') {
+                    (
+                        format!("{flag}="),
+                        format!(
+                            "{description} · expects <{}>",
+                            if hint.is_empty() { "value" } else { hint }
+                        ),
+                    )
+                } else {
+                    (name, description)
+                }
+            } else {
+                (name, description)
+            };
             result.push(Candidate {
                 value: format!("{command} {name}"),
                 description,
@@ -162,6 +191,14 @@ mod tests {
         assert!(items.iter().any(|item| item.value == "orbit deploy"));
         assert!(!items.iter().any(|item| item.value.contains("--secret")));
         assert!(!items.iter().any(|item| item.value.contains("evil")));
+    }
+
+    #[test]
+    fn recognizes_a_git_subcommand_flag_that_takes_a_value() {
+        let text = ".SH OPTIONS\n.TP\n.B --message=MSG\nSet the commit message\n";
+        let records = parse("git-commit.1", text);
+        assert_eq!(records[0].value, "git commit --message=");
+        assert!(records[0].description.contains("expects <MSG>"));
     }
 
     #[test]

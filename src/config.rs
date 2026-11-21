@@ -83,12 +83,15 @@ pub struct Behavior {
     pub trigger: Trigger,
     /// Visual ghost text, never executes or opens a Ratatui window.
     pub inline: bool,
+    /// Enable native filesystem event monitoring while the daemon runs.
+    pub auto_index: bool,
 }
 impl Default for Behavior {
     fn default() -> Self {
         Self {
             trigger: Trigger::OnError,
             inline: false,
+            auto_index: true,
         }
     }
 }
@@ -178,11 +181,12 @@ impl Config {
             Trigger::Manual | Trigger::Off => "0",
         };
         format!(
-            "EITA_POPUP_WIDTH\t{}\nEITA_POPUP_HEIGHT\t{}\nEITA_POPUP_THEME\t{}\nEITA_POPUP_ALIGN\t{}\nEITA_POPUP_POSITION\t{}\nEITA_RECOVER_ENABLED\t{}\nEITA_INLINE_ENABLED\t{}\nEITA_KEY_POPUP\t{}\nEITA_KEY_POPUP_FALLBACK\t{}\nEITA_KEY_ACCEPT\t{}\nEITA_KEY_REINDEX\t{}\n",
+            "EITA_POPUP_WIDTH\t{}\nEITA_POPUP_HEIGHT\t{}\nEITA_POPUP_THEME\t{}\nEITA_POPUP_ALIGN\t{}\nEITA_POPUP_POSITION\t{}\nEITA_RECOVER_ENABLED\t{}\nEITA_INLINE_ENABLED\t{}\nEITA_AUTO_INDEX_ENABLED\t{}\nEITA_KEY_POPUP\t{}\nEITA_KEY_POPUP_FALLBACK\t{}\nEITA_KEY_ACCEPT\t{}\nEITA_KEY_REINDEX\t{}\n",
             self.popup.width, self.popup.height,
             toml_key(self.popup.theme), toml_key(self.popup.align),
             toml_key(self.popup.position), trigger,
             if self.behavior.inline {"1"} else {"0"},
+            if self.behavior.auto_index {"1"} else {"0"},
             self.keys.popup, self.keys.popup_fallback,
             self.keys.accept, self.keys.reindex
         )

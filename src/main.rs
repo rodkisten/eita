@@ -10,6 +10,7 @@ mod man;
 mod recover;
 mod ui;
 mod usage;
+mod watch;
 
 use clap::{Parser, Subcommand, ValueEnum};
 use context::Context;
@@ -156,6 +157,8 @@ enum DaemonAction {
     Reload,
     Socket,
     Bench,
+    /// Synchronize PATH and fpath once when the shell changes.
+    Sync,
 }
 impl DaemonAction {
     fn as_str(self) -> &'static str {
@@ -167,6 +170,7 @@ impl DaemonAction {
             Self::Reload => "reload",
             Self::Socket => "socket",
             Self::Bench => "bench",
+            Self::Sync => "sync",
         }
     }
 }

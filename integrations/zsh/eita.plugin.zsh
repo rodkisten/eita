@@ -10,7 +10,7 @@ _eita_load_settings() {
   local key value
   while IFS=$'\t' read -r key value; do
     case "$key" in
-      EITA_POPUP_WIDTH|EITA_POPUP_HEIGHT|EITA_POPUP_THEME|EITA_POPUP_ALIGN|EITA_POPUP_POSITION|EITA_RECOVER_ENABLED|EITA_INLINE_ENABLED|EITA_KEY_POPUP|EITA_KEY_POPUP_FALLBACK|EITA_KEY_ACCEPT|EITA_KEY_REINDEX)
+      EITA_POPUP_WIDTH|EITA_POPUP_HEIGHT|EITA_POPUP_THEME|EITA_POPUP_ALIGN|EITA_POPUP_POSITION|EITA_RECOVER_ENABLED|EITA_INLINE_ENABLED|EITA_AUTO_INDEX_ENABLED|EITA_KEY_POPUP|EITA_KEY_POPUP_FALLBACK|EITA_KEY_ACCEPT|EITA_KEY_REINDEX)
         [[ -n "$value" ]] || continue
         if [[ -z "${(P)key}" ]]; then
           typeset -gx "$key=$value"
@@ -413,14 +413,19 @@ _eita_inline_fast() {
 
 eita-daemon-on() {
   emulate -L zsh
+  local -x EITA_FPATH="${(j.:.)fpath}"
   command eita daemon start || return 1
   export EITA_DAEMON_SOCKET="$(command eita daemon socket)"
   export EITA_DAEMON_ENABLED=1
+  if [[ "${EITA_AUTO_INDEX_ENABLED:-1}" == 1 ]]; then
+    eita-auto-index-on
+  fi
   print -r -- "🦀 Eita engine ON · $EITA_DAEMON_SOCKET"
 }
 
 eita-daemon-off() {
   # Disables this shell only, does not stop a daemon used by other terminals.
+  eita-auto-index-off
   export EITA_DAEMON_ENABLED=0
   print -r -- '🦀 Eita engine OFF in this shell'
 }
@@ -436,4 +441,42 @@ eita-learn-on() {
 
 eita-learn-off() {
   eita-usage-off
+}
+
+
+# ── Event-driven auto-index ─────────────────────────────────────────────────
+# precmd compares only in-memory PATH/fpath strings. No scanning and no
+# subprocess on unchanged prompts. On change, notify the daemon once.
+typeset -g _eita_last_source_signature=''
+_eita_sources_precmd() {
+  emulate -L zsh
+  setopt localoptions no_aliases
+  [[ "${EITA_AUTO_INDEX_ENABLED:-0}" == 1 && "${EITA_DAEMON_ENABLED:-0}" == 1 ]] || return 0
+  local fpath_joined="${(j.:.)fpath}"
+  local signature="${PATH}"$'\n'"${fpath_joined}"
+  [[ "$signature" == "$_eita_last_source_signature" ]] && return 0
+  _eita_last_source_signature="$signature"
+  # Avoid extra latency for the prompt; the daemon handles updates off-thread.
+  ( EITA_FPATH="$fpath_joined" command eita daemon sync >/dev/null 2>&1 ) &!
+}
+
+eita-auto-index-on() {
+  emulate -L zsh
+  export EITA_AUTO_INDEX_ENABLED=1
+  _eita_last_source_signature=''
+  autoload -Uz add-zsh-hook
+  add-zsh-hook -d precmd _eita_sources_precmd 2>/dev/null || true
+  add-zsh-hook precmd _eita_sources_precmd || true
+  _eita_sources_precmd
+  print -r -- '🦀 Auto-index ON · filesystem events + PATH/fpath changes'
+}
+
+eita-auto-index-off() {
+  export EITA_AUTO_INDEX_ENABLED=0
+  autoload -Uz add-zsh-hook
+  add-zsh-hook -d precmd _eita_sources_precmd 2>/dev/null || true
+}
+
+eita-auto-index-status() {
+  command eita daemon status
 }
