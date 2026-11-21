@@ -117,7 +117,7 @@ The experimental passive reader checks `FPATH` for `_command` completion files, 
 
 Eita now includes an **experimental passive man-page reader**. When suggesting a command, it checks local uncompressed and gzip-compressed man pages in sections 1 and 8 for simple roff flag declarations. This does not execute the command or run a man renderer. Coverage is currently limited: advanced roff macros, nested subcommands, option descriptions and dynamic argument types need further work.
 
-**Long-term source precedence:** installed Zsh completions and documented CLI schemas → parsed man pages → explicitly trusted `--help` probes → user JSON fallback. Actual source reconciliation, provenance and persistent knowledge caching are planned; today the JSON and passive man results are combined. JSON is primarily for fixtures and undocumented tools.
+**Long-term source precedence:** installed Zsh completions and documented CLI schemas → parsed man pages → explicitly trusted `--help` probes → user JSON fallback. Source reconciliation now merges identical command paths and flags, prioritizing passive Zsh definitions, then man pages, then JSON fixtures. Detailed per-field provenance, richer semantic conflict handling and executable-version tracking remain planned. JSON is primarily for fixtures and undocumented tools; automatic discovery wins on duplicate flag descriptions.
 
 ### 🧩 Structured command specs
 
@@ -146,7 +146,7 @@ Each entry declares a full `command` path, optional `flags` with `name`, `descri
 - [ ] Cursor-aware edits preserving surrounding text, quoting and pipes
 - [ ] Unknown-command correction with ranked suggestions
 - [ ] Persistent ranking from local command history (opt-in)
-- [x] Experimental passive Zsh completion file scanning for simple quoted flags\n- [x] Persistent metadata-invalidated Zsh completion cache\n- [x] Parent-command flag inheritance for structured specs\n- [ ] Zsh aliases, functions, live `compdef` mapping and comprehensive `fpath` index\n- [x] Experimental gzip man-page parsing and fingerprint-based knowledge cache
+- [x] Experimental passive Zsh completion file scanning for simple quoted flags\n- [x] Persistent metadata-invalidated Zsh completion cache\n- [x] Parent-command flag inheritance for structured specs\n- [x] Merge duplicate command paths and flags across Zsh, man and JSON sources\n- [ ] Zsh aliases, functions, live `compdef` mapping and comprehensive `fpath` index\n- [x] Experimental gzip man-page parsing and fingerprint-based knowledge cache
 - [x] Structured JSON specs for command paths, flags, positional values and static flag values
 - [ ] Dynamic value providers, shell-aware quoting and fuzzy ranking for spec values
 - [ ] Background service / daemon with optional file-system notifications
