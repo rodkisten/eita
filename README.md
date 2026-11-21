@@ -111,7 +111,7 @@ Use a **literal tab** between the command and description.
 
 ### 🐚 Learning from Zsh completion definitions
 
-The experimental passive reader checks `FPATH` for `_command` completion files, including one level of category subdirectories. It recognizes simple quoted option specifications such as `'--amend[Amend previous commit]'` and `'--cleanup=-[Cleanup mode]'`. It **never sources shell functions**. This is a narrow static extraction, not execution of the Zsh completion engine: dynamically generated options, `compdef` aliases, nested subcommands, `_describe` and conditional specifications are not supported yet. The file reader currently runs on each suggestion and does not yet have a dedicated persistent cache.
+The experimental passive reader checks `FPATH` for `_command` completion files, including one level of category subdirectories. It recognizes simple quoted option specifications such as `'--amend[Amend previous commit]'` and `'--cleanup=-[Cleanup mode]'`. It **never sources shell functions**. This is a narrow static extraction, not execution of the Zsh completion engine: dynamically generated options, `compdef` aliases, nested subcommands, `_describe` and conditional specifications are not supported yet. The reader now persists parsed flags under `$XDG_CACHE_HOME/eita/zsh-<command>.json` (or `~/.cache/eita/`), invalidating entries when the source path, file size or modification time changes. It still performs a lightweight filesystem lookup on each suggestion.
 
 ### 🧠 Learning from installed documentation
 
@@ -131,7 +131,7 @@ eita suggest --line 'gh pr list --state mer'
 eita pick --line 'docker compose up --pu'
 ```
 
-Each entry declares a full `command` path, optional `flags` with `name`, `description`, `takes_value`, `values`, and optional `arguments` with `name` and static `values`. The engine resolves the command path first, then offers valid flags and declared values. JSON files are read locally; Eita does not execute the described commands. Values are currently prefix-matched.
+Each entry declares a full `command` path, optional `flags` with `name`, `description`, `takes_value`, `values`, and optional `arguments` with `name` and static `values`. The engine resolves the command path first, then offers valid flags and declared values. Flags from parent command paths are inherited by child commands, while positional values remain scoped to their declaring path. JSON files are read locally; Eita does not execute the described commands. Values are currently prefix-matched.
 
 ## 🎛️ Experience roadmap
 
@@ -146,7 +146,7 @@ Each entry declares a full `command` path, optional `flags` with `name`, `descri
 - [ ] Cursor-aware edits preserving surrounding text, quoting and pipes
 - [ ] Unknown-command correction with ranked suggestions
 - [ ] Persistent ranking from local command history (opt-in)
-- [x] Experimental passive Zsh completion file scanning for simple quoted flags\n- [ ] Zsh aliases, functions, live `compdef` mapping and comprehensive `fpath` index\n- [x] Experimental gzip man-page parsing and fingerprint-based knowledge cache
+- [x] Experimental passive Zsh completion file scanning for simple quoted flags\n- [x] Persistent metadata-invalidated Zsh completion cache\n- [x] Parent-command flag inheritance for structured specs\n- [ ] Zsh aliases, functions, live `compdef` mapping and comprehensive `fpath` index\n- [x] Experimental gzip man-page parsing and fingerprint-based knowledge cache
 - [x] Structured JSON specs for command paths, flags, positional values and static flag values
 - [ ] Dynamic value providers, shell-aware quoting and fuzzy ranking for spec values
 - [ ] Background service / daemon with optional file-system notifications
