@@ -2,6 +2,7 @@ mod catalog;
 mod engine;
 mod specs;
 mod man;
+mod zsh;
 mod ui;
 
 use clap::{Parser, Subcommand, ValueEnum};
@@ -62,6 +63,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         Commands::Bench { .. } => None,
     };
     if let Some(root) = active_line.and_then(|line| line.split_whitespace().next()) {
+        command_specs.extend(zsh::learn(root));
         command_specs.extend(man::learn(root));
     }
     match cli.command {
