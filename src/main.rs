@@ -1,5 +1,6 @@
 mod catalog;
 mod engine;
+mod specs;
 mod ui;
 
 use clap::{Parser, Subcommand, ValueEnum};
@@ -52,13 +53,14 @@ enum Format {
 fn main() -> Result<(), Box<dyn Error>> {
     let cli = Cli::parse();
     let catalog = catalog::load_catalog();
+    let command_specs = specs::load();
     match cli.command {
         Commands::Suggest {
             line,
             limit,
             format,
         } => {
-            let suggestions = engine::suggest(&catalog, &line, limit);
+            let suggestions = engine::suggest_with_specs(&catalog, &command_specs, &line, limit);
             match format {
                 Format::Json => println!("{}", serde_json::to_string_pretty(&suggestions)?),
                 Format::Lines => {
