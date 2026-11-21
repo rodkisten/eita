@@ -265,8 +265,25 @@ eita popup --line 'git com'  # caixa visualmente compacta, tema editável
 
 Configure largura, altura, tema, alinhamento, atalhos e gatilho automático
 pelo arquivo TOML. Veja [configuração e atalhos](docs/CONFIGURATION.md).
-O serviço de índice em memória ainda é um
-[bloco de arquitetura planejado](docs/DAEMON.md), não um daemon já instalado.
+O serviço local de sugestões e aprendizado está documentado em
+[Aprendizado e cache quente](docs/DAEMON.md).
+
+## ⚡ Engine persistente + aprendizado seguro
+
+~~~zsh
+source "$HOME/.local/share/eita/eita.plugin.zsh"
+eita-daemon-on    # inicia processo Rust local com socket Unix
+eita-inline-on    # texto fantasma via socket (sem binário por tecla)
+eita-learn-on     # aprende apenas templates permitidos, sem argumentos
+eita daemon status
+eita daemon bench
+~~~
+
+O motor mantém catálogo na RAM, LRU de 256 consultas, invalidação por
+mtime de caches e desligamento após 15 minutos ociosos. Todas as operações
+funcionam sem o daemon, com fallback. Para detalhes de privacidade,
+operações, segurança e limites, veja
+[Aprendizado e cache quente](docs/DAEMON.md).
 
 ## Desenvolvimento
 

@@ -114,7 +114,11 @@ _eita_inline_pre_redraw() {
   if [[ "$left" == "$_eita_cached_left" ]]; then
     ghost="$_eita_cached_suffix"
   else
-    ghost=$(command eita inline --left "$left" 2>/dev/null) || ghost=''
+    if [[ "${EITA_DAEMON_ENABLED:-0}" == 1 ]] && _eita_inline_fast "$left"; then
+      ghost="$REPLY"
+    else
+      ghost=$(command eita inline --left "$left" 2>/dev/null) || ghost=''
+    fi
     _eita_cached_left="$left"
     _eita_cached_suffix="$ghost"
   fi
@@ -173,21 +177,22 @@ eita-inline-off() {
 # ── Optional local ranking; only known command templates are stored ─────────
 _eita_usage_preexec() {
   [[ "${EITA_USAGE_ENABLED:-0}" == 1 ]] || return 0
-  command eita usage record --line "$1" >/dev/null 2>&1
+  # Never put the raw command in the process argument list.
+  print -r -- "$1" | command eita usage record --stdin >/dev/null 2>&1
 }
 
 eita-usage-on() {
   autoload -Uz add-zsh-hook
   export EITA_USAGE_ENABLED=1
-  add-zsh-hook -d preexec _eita_usage_preexec 2>/dev/null
-  add-zsh-hook preexec _eita_usage_preexec
+  add-zsh-hook -d preexec _eita_usage_preexec 2>/dev/null || true
+  add-zsh-hook preexec _eita_usage_preexec || true
   print -r -- '🦀 Eita ranking ON · only recognized command templates are stored locally'
 }
 
 eita-usage-off() {
   export EITA_USAGE_ENABLED=0
   autoload -Uz add-zsh-hook
-  add-zsh-hook -d preexec _eita_usage_preexec 2>/dev/null
+  add-zsh-hook -d preexec _eita_usage_preexec 2>/dev/null || true
   print -r -- '🦀 Eita ranking OFF'
 }
 
@@ -374,3 +379,61 @@ eita-what() {
 if [[ "${EITA_RECOVER_ENABLED:-1}" == 1 ]]; then
   eita-recover-on
 fi
+
+# ── Persistent low-latency engine ──────────────────────────────────────────
+# Uses Zsh builtins zsocket and zselect. This path does NOT spawn Rust on each
+# keystroke. Short timeout and automatic fallback preserve interactive editing.
+_eita_inline_fast() {
+  emulate -L zsh
+  setopt localoptions no_aliases
+  local left="$1" fd response
+  [[ -n "${EITA_DAEMON_SOCKET:-}" && -S "$EITA_DAEMON_SOCKET" ]] || return 1
+  [[ "$left" != *$'\n'* && "$left" != *$'\t'* ]] || return 1
+  [[ "$PATH" != *$'\n'* && "$PATH" != *$'\t'* ]] || return 1
+  zmodload zsh/net/socket 2>/dev/null || return 1
+  zmodload zsh/zselect 2>/dev/null || return 1
+  zsocket "$EITA_DAEMON_SOCKET" 2>/dev/null || return 1
+  fd=$REPLY
+  if ! print -r -u "$fd" -- "I"$'\t'"$PATH"$'\t'"$left"; then
+    exec {fd}>&-
+    return 1
+  fi
+  if ! zselect -r "$fd" -t 4 >/dev/null 2>&1; then
+    exec {fd}>&-
+    return 1
+  fi
+  if ! IFS= read -r -u "$fd" response; then
+    exec {fd}>&-
+    return 1
+  fi
+  exec {fd}>&-
+  [[ "$response" == .* ]] || return 1
+  REPLY="${response#?}"
+}
+
+eita-daemon-on() {
+  emulate -L zsh
+  command eita daemon start || return 1
+  export EITA_DAEMON_SOCKET="$(command eita daemon socket)"
+  export EITA_DAEMON_ENABLED=1
+  print -r -- "🦀 Eita engine ON · $EITA_DAEMON_SOCKET"
+}
+
+eita-daemon-off() {
+  # Disables this shell only, does not stop a daemon used by other terminals.
+  export EITA_DAEMON_ENABLED=0
+  print -r -- '🦀 Eita engine OFF in this shell'
+}
+
+eita-daemon-status() {
+  command eita daemon status
+}
+
+eita-learn-on() {
+  eita-usage-on
+  print -r -- '🧠 Learning safe command templates only, no arguments or values'
+}
+
+eita-learn-off() {
+  eita-usage-off
+}

@@ -1,10 +1,10 @@
 use crate::catalog::Candidate;
 use crate::usage::Usage;
 use frizbee::{Config, Matcher};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::cmp::Reverse;
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct Suggestion {
     pub value: String,
     pub description: String,

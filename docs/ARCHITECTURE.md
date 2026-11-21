@@ -97,3 +97,14 @@ do terminal**. `position` alinha dentro dessa área, não em relação
 às coordenadas absolutas do cursor. Um renderizador ancorado ao
 ZLE e um processo de sugestões persistente estão descritos em
 `docs/DAEMON.md`.
+
+
+## Motor persistente e cache
+
+`src/daemon.rs` hospeda um serviço opcional em socket Unix de uso local,
+com catálogo carregado uma vez, limite de 256 respostas em cache,
+timeouts e recarga por alteração dos arquivos de completions/aprendizado.
+O ZLE usa `zsocket` e `zselect` para consultar sem inicializar Rust a
+cada tecla (fallback CLI em caso de erro). `src/usage.rs` mantém somente
+templates aprovados, com bônus de frequência limitado e sem persistir
+argumentos. Veja `docs/DAEMON.md`.

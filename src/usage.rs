@@ -25,6 +25,12 @@ impl Usage {
         if !Self::enabled() {
             return Self::default();
         }
+        Self::load_saved()
+    }
+
+    /// Existing opt-in data can be reloaded by a daemon that was started
+    /// before this particular shell enabled tracking.
+    pub fn load_saved() -> Self {
         let path = usage_path();
         if fs::metadata(&path).is_ok_and(|meta| meta.len() > MAX_BYTES) {
             return Self::default();
@@ -35,6 +41,170 @@ impl Usage {
         serde_json::from_slice::<Self>(&bytes).unwrap_or_default()
     }
 
+    /// Learned candidates are strictly whitelisted command/subcommand templates.
+    /// Never import history, paths, arbitrary shell arguments, or opaque flags.
+    pub fn learned(&self) -> Vec<Candidate> {
+        let mut output: Vec<_> = self
+            .counts
+            .iter()
+            .filter_map(|(value, count)| {
+                if *count < 2 || Self::safe_template(value).as_deref() != Some(value.as_str()) {
+                    return None;
+                }
+                Some(Candidate {
+                    value: value.clone(),
+                    description: "Aprendido localmente (apenas template)".into(),
+                    source: "learned".into(),
+                })
+            })
+            .collect();
+        output.sort_by(|a, b| a.value.cmp(&b.value));
+        output
+    }
+
+    fn safe_template(line: &str) -> Option<String> {
+        let mut parts = line.split_whitespace();
+        let root = parts.next()?;
+        let verb = parts.next()?;
+        let verbs: &[&str] = match root {
+            "git" => &[
+                "add",
+                "bisect",
+                "branch",
+                "checkout",
+                "cherry-pick",
+                "clean",
+                "clone",
+                "commit",
+                "diff",
+                "fetch",
+                "grep",
+                "init",
+                "log",
+                "merge",
+                "pull",
+                "push",
+                "rebase",
+                "reflog",
+                "remote",
+                "reset",
+                "restore",
+                "revert",
+                "show",
+                "stash",
+                "status",
+                "submodule",
+                "switch",
+                "tag",
+                "worktree",
+            ],
+            "gh" => &[
+                "api", "auth", "gist", "issue", "pr", "release", "repo", "run", "workflow",
+            ],
+            "cargo" => &[
+                "add", "bench", "build", "check", "clean", "clippy", "doc", "fmt", "install",
+                "new", "publish", "run", "search", "test", "tree", "update",
+            ],
+            "docker" => &[
+                "build",
+                "compose",
+                "container",
+                "exec",
+                "images",
+                "inspect",
+                "logs",
+                "network",
+                "ps",
+                "pull",
+                "push",
+                "run",
+                "stop",
+                "volume",
+            ],
+            "kubectl" => &[
+                "apply",
+                "config",
+                "create",
+                "delete",
+                "describe",
+                "edit",
+                "exec",
+                "get",
+                "logs",
+                "port-forward",
+                "rollout",
+                "scale",
+                "top",
+            ],
+            "npm" => &[
+                "audit",
+                "ci",
+                "exec",
+                "install",
+                "outdated",
+                "publish",
+                "run",
+                "test",
+                "uninstall",
+                "update",
+                "view",
+            ],
+            "pnpm" => &[
+                "add", "build", "dev", "dlx", "exec", "install", "lint", "outdated", "remove",
+                "run", "test", "update",
+            ],
+            "yarn" => &["add", "build", "install", "remove", "run", "test", "up"],
+            "bun" => &["add", "build", "install", "run", "test", "update", "x"],
+            "go" => &[
+                "build", "clean", "doc", "env", "fmt", "get", "install", "mod", "run", "test",
+                "vet",
+            ],
+            "aws" => &[
+                "cloudformation",
+                "cloudfront",
+                "ec2",
+                "ecs",
+                "ecr",
+                "iam",
+                "lambda",
+                "s3",
+                "sts",
+            ],
+            "gcloud" => &[
+                "auth",
+                "builds",
+                "compute",
+                "config",
+                "functions",
+                "iam",
+                "projects",
+                "run",
+                "storage",
+            ],
+            "wrangler" => &[
+                "deploy", "dev", "d1", "pages", "r2", "secret", "tail", "types",
+            ],
+            _ => return None,
+        };
+        if !verbs.contains(&verb) {
+            return None;
+        }
+        // Optional third token only from a small universal flag vocabulary;
+        // everything following is dropped, never stored.
+        let flag = parts.next();
+        let flag = match flag {
+            Some(
+                "-h" | "--help" | "-v" | "--verbose" | "-q" | "--quiet" | "--all" | "--short"
+                | "--oneline" | "--dry-run" | "--force" | "--json",
+            ) => flag,
+            _ => None,
+        };
+        Some(match flag {
+            Some(flag) => format!("{root} {verb} {flag}"),
+            None => format!("{root} {verb}"),
+        })
+    }
+
     pub fn bonus(&self, candidate: &str) -> i64 {
         // Bounded history cannot outrank a completely unrelated query.
         i64::from(self.counts.get(candidate).copied().unwrap_or(0).min(40)) * 12
@@ -42,16 +212,22 @@ impl Usage {
 
     pub fn record(&mut self, line: &str, catalog: &[Candidate]) -> Option<String> {
         let normalized = line.trim_start();
-        let command = catalog
+        let from_catalog = catalog
             .iter()
             .filter(|item| {
                 normalized == item.value
                     || (normalized.starts_with(&item.value)
                         && normalized[item.value.len()..].starts_with(char::is_whitespace))
             })
-            .max_by_key(|item| item.value.len())?
-            .value
-            .clone();
+            .max_by_key(|item| item.value.len())
+            .map(|item| item.value.clone());
+        let safe = Self::safe_template(normalized);
+        let command = match (from_catalog, safe) {
+            (Some(existing), Some(new)) if new.len() > existing.len() => new,
+            (Some(existing), _) => existing,
+            (None, Some(new)) => new,
+            (None, None) => return None,
+        };
 
         if !self.counts.contains_key(&command) && self.counts.len() >= MAX_ENTRIES {
             return None;
@@ -101,7 +277,7 @@ impl Usage {
     }
 }
 
-fn usage_path() -> PathBuf {
+pub fn usage_path() -> PathBuf {
     if let Some(path) = env::var_os("EITA_USAGE_FILE") {
         return path.into();
     }
@@ -148,6 +324,26 @@ mod tests {
             Some("git commit --amend".into())
         );
         assert_eq!(usage.bonus("git commit --amend"), 12);
+    }
+
+    #[test]
+    fn learns_only_whitelisted_templates_and_never_arguments() {
+        let mut usage = Usage::default();
+        assert_eq!(
+            usage.record("git worktree prune --expire=private", &sample()),
+            Some("git worktree".into())
+        );
+        assert!(usage.learned().is_empty());
+        usage.record("git worktree add /sensitive/location", &sample());
+        let learned = usage.learned();
+        assert_eq!(learned[0].value, "git worktree");
+        assert!(!serde_json::to_string(&usage).unwrap().contains("sensitive"));
+        assert_eq!(usage.record("ssh example.secret.host", &sample()), None);
+        assert_eq!(usage.record("echo API_KEY=password", &sample()), None);
+        assert_eq!(
+            usage.record("git commit -m super-secret", &sample()),
+            Some("git commit".into())
+        );
     }
 
     #[test]

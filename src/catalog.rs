@@ -163,6 +163,17 @@ fn load_with_path(scan_path: bool) -> Vec<Candidate> {
         }
     }
 
+    // Include learned templates only when explicitly opted in; never raw commands.
+    for learned in crate::usage::Usage::load().learned() {
+        insert(
+            &mut catalog,
+            &mut seen,
+            &learned.value,
+            &learned.description,
+            &learned.source,
+        );
+    }
+
     // Cached static Zsh definitions are data, never executed as shell code.
     for completion in crate::completion::load() {
         insert(

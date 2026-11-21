@@ -3,6 +3,7 @@ mod catalog;
 mod completion;
 mod config;
 mod context;
+mod daemon;
 mod engine;
 mod inline;
 mod recover;
@@ -14,6 +15,7 @@ use context::Context;
 use serde::Serialize;
 use std::error::Error;
 use std::fs;
+use std::io::Read;
 use std::path::PathBuf;
 use std::time::Instant;
 use usage::Usage;
@@ -104,6 +106,11 @@ enum Commands {
         #[arg(long, value_parser = clap::value_parser!(u16).range(6..=14))]
         height: Option<u16>,
     },
+    /// Socket Unix / motor persistente com cache em memória.
+    Daemon {
+        #[command(subcommand)]
+        action: DaemonAction,
+    },
     /// Histórico local opt-in, guardando SOMENTE templates reconhecidos.
     Usage {
         #[command(subcommand)]
@@ -136,11 +143,37 @@ enum ConfigAction {
     Zsh,
 }
 
+#[derive(Copy, Clone, Subcommand)]
+enum DaemonAction {
+    Start,
+    Serve,
+    Stop,
+    Status,
+    Reload,
+    Socket,
+    Bench,
+}
+impl DaemonAction {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Start => "start",
+            Self::Serve => "serve",
+            Self::Stop => "stop",
+            Self::Status => "status",
+            Self::Reload => "reload",
+            Self::Socket => "socket",
+            Self::Bench => "bench",
+        }
+    }
+}
+
 #[derive(Subcommand)]
 enum UsageAction {
     Record {
+        #[arg(long, conflicts_with = "stdin")]
+        line: Option<String>,
         #[arg(long)]
-        line: String,
+        stdin: bool,
     },
     Status,
     Clear,
@@ -205,6 +238,51 @@ fn main() -> Result<(), Box<dyn Error>> {
             }
         }
         return Ok(());
+    }
+    if let Commands::Daemon { action } = &cli.command {
+        return daemon::command(action.as_str());
+    }
+    if let Commands::Inline { left } = &cli.command {
+        if let Some(suffix) = daemon::inline(left) {
+            if !suffix.is_empty() {
+                println!("{suffix}");
+            }
+            return Ok(());
+        }
+    }
+    if let Commands::Suggest {
+        line,
+        left,
+        right,
+        limit,
+        format,
+    } = &cli.command
+    {
+        let context = context(line.clone(), left.clone(), right.clone());
+        if let Some(query) = context.query() {
+            if let Some(matches) = daemon::suggest(query, *limit) {
+                let items: Vec<ContextualSuggestion> = matches
+                    .into_iter()
+                    .map(|suggestion| {
+                        let applied = context.apply(&suggestion.value);
+                        ContextualSuggestion {
+                            suggestion,
+                            replacement: applied.replacement,
+                            cursor: applied.cursor,
+                        }
+                    })
+                    .collect();
+                match format {
+                    Format::Json => println!("{}", serde_json::to_string_pretty(&items)?),
+                    Format::Lines => {
+                        for item in items {
+                            println!("{}", item.replacement);
+                        }
+                    }
+                }
+                return Ok(());
+            }
+        }
     }
     let settings = config::Config::load()?;
     let catalog = if matches!(
@@ -285,6 +363,14 @@ fn main() -> Result<(), Box<dyn Error>> {
                 completion::rebuild(fpath.as_deref(), &destination)?
             };
             println!("{}", serde_json::to_string_pretty(&report)?);
+            if !status && daemon::enabled() {
+                let _ = daemon::query(&daemon::Request {
+                    op: "reload".into(),
+                    input: String::new(),
+                    limit: 0,
+                    path: String::new(),
+                });
+            }
         }
         Commands::Recover {
             word,
@@ -329,14 +415,32 @@ fn main() -> Result<(), Box<dyn Error>> {
             }
         }
         Commands::Usage { action } => match action {
-            UsageAction::Record { line } => {
+            UsageAction::Record { line, stdin } => {
                 if !Usage::enabled() {
                     return Err("Opt-in required: EITA_USAGE_ENABLED=1".into());
                 }
+                let input = if stdin {
+                    let mut bytes = Vec::new();
+                    std::io::stdin().take(4097).read_to_end(&mut bytes)?;
+                    if bytes.len() > 4096 {
+                        return Err("usage input too long".into());
+                    }
+                    String::from_utf8(bytes)?
+                } else {
+                    line.unwrap_or_default()
+                };
                 let mut stats = usage;
-                if let Some(template) = stats.record(&line, &catalog) {
+                if let Some(template) = stats.record(&input, &catalog) {
                     stats.save()?;
                     println!("{template}");
+                    if daemon::enabled() {
+                        let _ = daemon::query(&daemon::Request {
+                            op: "reload".into(),
+                            input: String::new(),
+                            limit: 0,
+                            path: String::new(),
+                        });
+                    }
                 }
             }
             UsageAction::Status => {
@@ -348,6 +452,7 @@ fn main() -> Result<(), Box<dyn Error>> {
             }
         },
         Commands::Config { .. } => unreachable!("config handled before catalog loading"),
+        Commands::Daemon { .. } => unreachable!("daemon handled before catalog loading"),
         Commands::Bench {
             iterations,
             compare,

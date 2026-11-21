@@ -77,6 +77,25 @@ jobs:
           ./target/release/eita recover --word EDTIOR --kind variable --symbols-file "$GITHUB_WORKSPACE/tests/fixtures/symbols.tsv" --format lines | grep -x EDITOR
           ./target/release/eita recover --word git --symbols-file "$GITHUB_WORKSPACE/tests/fixtures/symbols.tsv" --format json | grep -F '[]'
           ./target/release/eita bench --iterations 50
+          # Learning never stores arguments and starts after repeated safe templates.
+          export EITA_USAGE_ENABLED=1
+          export EITA_USAGE_FILE="$RUNNER_TEMP/eita-learn.json"
+          printf 'git worktree add /sensitive/example\n' | ./target/release/eita usage record --stdin | grep -x 'git worktree'
+          printf 'git worktree prune /also-sensitive\n' | ./target/release/eita usage record --stdin | grep -x 'git worktree'
+          ! grep -E 'sensitive|example|also-sensitive' "$EITA_USAGE_FILE"
+          ./target/release/eita suggest --line 'git workt' --format lines | grep -x 'git worktree'
+          # Engine socket: no TCP and no unnecessary new background process.
+          export EITA_DAEMON_SOCKET="$RUNNER_TEMP/eita-daemon/engine.sock"
+          export EITA_DAEMON_ENABLED=1
+          export PATH="$GITHUB_WORKSPACE/target/release:$PATH"
+          ./target/release/eita daemon start
+          trap './target/release/eita daemon stop >/dev/null 2>&1 || true' EXIT
+          ./target/release/eita daemon status | grep -F '"pid"'
+          ./target/release/eita inline --left 'git com' | grep -x 'mit'
+          ./target/release/eita daemon bench | grep -F '"p95_us"'
+          ./target/release/eita daemon reload | grep -F 'reloaded'
+          ./target/release/eita daemon stop | grep -F 'stopping'
+          unset EITA_DAEMON_ENABLED EITA_DAEMON_SOCKET EITA_USAGE_ENABLED EITA_USAGE_FILE
       - name: Check installer syntax
         run: sh -n install.sh
       - name: Check Zsh plugin syntax
@@ -85,6 +104,19 @@ jobs:
           sudo apt-get install -y -qq zsh
           zsh -n integrations/zsh/eita.plugin.zsh
           zsh -n tests/recover.zsh
+          # Native Zsh socket integration must run AFTER installing Zsh.
+          export EITA_DAEMON_SOCKET="$RUNNER_TEMP/eita-native/engine.sock"
+          export EITA_DAEMON_ENABLED=1
+          PATH="$GITHUB_WORKSPACE/target/release:$PATH" ./target/release/eita daemon start
+          trap './target/release/eita daemon stop >/dev/null 2>&1 || true' EXIT
+          PATH="$GITHUB_WORKSPACE/target/release:$PATH" zsh -fic '
+            source integrations/zsh/eita.plugin.zsh
+            _eita_inline_fast "git com" || return 1
+            print -r -- "$REPLY"
+          ' | grep -x mit
+          ./target/release/eita daemon stop | grep -F 'stopping'
+          unset EITA_DAEMON_ENABLED EITA_DAEMON_SOCKET
+          zsh -n integrations/zsh/eita.plugin.zsh
           if ! PATH="$GITHUB_WORKSPACE/target/release:$PATH" zsh -fic 'source tests/recover.zsh'; then
             echo "::error::Zsh recovery integration failed. Last 100 trace lines:"
             PATH="$GITHUB_WORKSPACE/target/release:$PATH" zsh -fixc 'source tests/recover.zsh' 2>&1 | tail -100
