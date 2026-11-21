@@ -1,6 +1,18 @@
 //! Passive Zsh completion inspection. Does not source or execute completion functions.
 use crate::specs::{CommandSpec, FlagSpec};
-use std::{collections::HashSet, env, fs, path::PathBuf};
+use std::{collections::HashSet, env, fs, path::PathBuf, time::UNIX_EPOCH};
+use serde::{Serialize, Deserialize};
+
+#[derive(Serialize, Deserialize)]
+struct Cache { fingerprint: String, flags: Vec<FlagSpec> }
+
+fn cache_file(root: &str) -> Option<PathBuf> {
+    let base = env::var_os("EITA_CACHE_DIR").map(PathBuf::from)
+        .or_else(|| env::var_os("XDG_CACHE_HOME").map(|p| PathBuf::from(p).join("eita")))
+        .or_else(|| env::var_os("HOME").map(|p| PathBuf::from(p).join(".cache/eita")))?;
+    Some(base.join(format!("zsh-{root}.json")))
+}
+
 
 fn directories() -> Vec<PathBuf> {
     let mut paths: Vec<PathBuf> = env::var_os("FPATH")
@@ -53,8 +65,30 @@ pub fn learn(root: &str) -> Vec<CommandSpec> {
     let Some(path) = find_file(root, &directories()) else { return Vec::new() };
     let Ok(metadata) = fs::metadata(&path) else { return Vec::new() };
     if metadata.len() > 2 * 1024 * 1024 { return Vec::new(); }
+    let modified = metadata.modified().ok().and_then(|time| time.duration_since(UNIX_EPOCH).ok()).map(|time| time.as_nanos()).unwrap_or_default();
+    let fingerprint = format!("{}:{}:{}", path.display(), metadata.len(), modified);
+    let cache = cache_file(root);
+    if let Some(ref file) = cache {
+        if let Ok(bytes) = fs::read(file) {
+            if let Ok(saved) = serde_json::from_slice::<Cache>(&bytes) {
+                if saved.fingerprint == fingerprint {
+                    return vec![CommandSpec { command: root.into(), flags: saved.flags, arguments: vec![] }];
+                }
+            }
+        }
+    }
     let Ok(source) = fs::read_to_string(&path) else { return Vec::new() };
     let flags = extract(&source);
+    if let Some(file) = cache {
+        if let Some(dir) = file.parent() {
+            if fs::create_dir_all(dir).is_ok() {
+                if let Ok(bytes) = serde_json::to_vec(&Cache { fingerprint, flags: flags.clone() }) {
+                    let temp = file.with_extension(format!("{}.tmp", std::process::id()));
+                    if fs::write(&temp, bytes).is_ok() { let _ = fs::rename(&temp, &file); }
+                }
+            }
+        }
+    }
     if flags.is_empty() { return Vec::new(); }
     vec![CommandSpec { command: root.into(), flags, arguments: vec![] }]
 }
