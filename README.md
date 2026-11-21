@@ -71,7 +71,7 @@ Eita scopes candidate matching to the active command path instead of matching th
 | `git commit --am` | `git commit --amend` | Flag within a subcommand |
 | `git checkout ` | Child candidates only | Preserve parent context |
 
-The current implementation matches **known catalog entries**, not arbitrary dynamically discovered flag schemas. Typed argument values, `--flag=value`, quote-aware cursor replacement and live Zsh completion function introspection remain planned.
+The current implementation matches **known catalog entries**, not arbitrary dynamically discovered flag schemas. Structured JSON specs now support declared flags, positional values, and both `--flag=value` and `--flag value` completions. Quote-aware cursor replacement and live Zsh completion function introspection remain planned.
 
 ### ⚡ Smart PATH indexing
 
@@ -97,7 +97,7 @@ Default location: `$XDG_CACHE_HOME/eita/path-index.json` or `~/.cache/eita/path-
 | Zsh aliases, functions and `fpath` definitions | 🗓️ | Shell adapter and incremental index |
 | Native `_arguments` / `compdef` specs | 🗓️ | Structured completion knowledge |
 | Man pages and `--help` ingestion | 🗓️ | Safe opt-in parsing |
-| Accepted positional arguments and dynamic values | 🗓️ | Typed, context-sensitive providers |
+| Declared positional values and flag values | ✅ | JSON schemas, static values |\n| Dynamic argument value providers | 🗓️ | Context-sensitive runtime sources |
 
 Custom specs live at `~/.config/eita/specs.tsv` (or `$XDG_CONFIG_HOME/eita/specs.tsv`). Override with `EITA_SPECS`.
 
@@ -107,6 +107,20 @@ mytool deploy --dry-run	Preview deployment
 ```
 
 Use a **literal tab** between the command and description.
+
+### 🧩 Structured command specs
+
+Copy [examples/commands.json](examples/commands.json) to `~/.config/eita/commands.json`, or set `EITA_COMMAND_SPECS` to a custom JSON file.
+
+```sh
+mkdir -p ~/.config/eita
+cp examples/commands.json ~/.config/eita/commands.json
+eita suggest --line 'git commit --cleanup=st'
+eita suggest --line 'gh pr list --state mer'
+eita pick --line 'docker compose up --pu'
+```
+
+Each entry declares a full `command` path, optional `flags` with `name`, `description`, `takes_value`, `values`, and optional `arguments` with `name` and static `values`. The engine resolves the command path first, then offers valid flags and declared values. JSON files are read locally; Eita does not execute the described commands. Values are currently prefix-matched.
 
 ## 🎛️ Experience roadmap
 
@@ -122,7 +136,7 @@ Use a **literal tab** between the command and description.
 - [ ] Unknown-command correction with ranked suggestions
 - [ ] Persistent ranking from local command history (opt-in)
 - [ ] Zsh aliases, functions, completions and `fpath` index
-- [ ] Structured subcommand/flag/argument specs and value providers
+- [x] Structured JSON specs for command paths, flags, positional values and static flag values\n- [ ] Dynamic value providers, shell-aware quoting and fuzzy ranking for spec values
 - [ ] Background service / daemon with optional file-system notifications
 - [ ] Incremental indexing, bounded cache, versioning and self-healing
 - [ ] Configurable exclusions and privacy controls
