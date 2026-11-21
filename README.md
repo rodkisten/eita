@@ -285,6 +285,33 @@ funcionam sem o daemon, com fallback. Para detalhes de privacidade,
 operações, segurança e limites, veja
 [Aprendizado e cache quente](docs/DAEMON.md).
 
+## 🧭 Aprendizado de flags e índice incremental
+
+O índice agora usa snapshots de arquivos (tamanho + mtime em nanossegundos)
+para **reaproveitar fontes não alteradas**, detectar arquivos novos/removidos
+e evitar reescrever o cache quando nada mudou. A saída de indexação mostra
+`reused_files`, `updated_files`, `removed_files` e `unchanged`.
+
+~~~zsh
+# Indexar definições Zsh e manpages explicitamente autorizadas:
+eita-index --man-dir /usr/share/man
+# Verificar estado sem reconstruir:
+eita index --status
+# Consultar flags e subcomandos aprendidos:
+eita suggest --line 'git commit --' --format lines
+~~~
+
+As páginas de manual `.1`, `.1p` e `.8`, inclusive `.gz`, são
+lidas como texto roff **sem executar man, pagers, shell ou os comandos**.
+A leitura é conservadora: somente padrões estáticos `.SH OPTIONS`,
+`.SH COMMANDS`, `.TP` e `.B`/`.BR`/`.BI`. Documentos complexos podem
+exigir o índice de completions Zsh para cobertura maior. A indexação
+de manpages é **opt-in** via `--man-dir` ou `EITA_MANPATH`.
+
+Para documentação, segurança e exemplos completos, consulte
+[Índice incremental](docs/INDEXING.md). O daemon faz `reload` quando
+uma reconstrução efetivamente altera o cache.
+
 ## Desenvolvimento
 
 ~~~sh

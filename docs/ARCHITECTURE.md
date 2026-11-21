@@ -108,3 +108,13 @@ O ZLE usa `zsocket` e `zselect` para consultar sem inicializar Rust a
 cada tecla (fallback CLI em caso de erro). `src/usage.rs` mantém somente
 templates aprovados, com bônus de frequência limitado e sem persistir
 argumentos. Veja `docs/DAEMON.md`.
+
+
+## Índice incremental v2 e manpages estáticas
+
+`src/completion.rs` persiste snapshots com `size`, `mtime` e candidatos
+por fonte, reutilizando registros quando a fonte está inalterada.
+`src/man.rs` permite índice opt-in de roff local descompactado ou gzip
+sem criar processos ou executar código. `eita index --status` reporta
+cache versionado, e um rebuild sem mudanças não causa escrita nem
+reload do daemon. Veja `docs/INDEXING.md`.

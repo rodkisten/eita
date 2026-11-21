@@ -6,6 +6,7 @@ mod context;
 mod daemon;
 mod engine;
 mod inline;
+mod man;
 mod recover;
 mod ui;
 mod usage;
@@ -78,6 +79,9 @@ enum Commands {
         /// Substitui o caminho do cache usado nesta operação.
         #[arg(long)]
         cache: Option<PathBuf>,
+        /// Opt-in: ler páginas man roff locais (.1, .8 e .gz), sem executá-las.
+        #[arg(long)]
+        man_dir: Option<String>,
         /// Exibe estatísticas do cache sem reconstruir o índice.
         #[arg(long, conflicts_with = "refresh")]
         status: bool,
@@ -354,16 +358,17 @@ fn main() -> Result<(), Box<dyn Error>> {
             refresh: _,
             fpath,
             cache,
+            man_dir,
             status,
         } => {
             let destination = cache.unwrap_or_else(completion::cache_path);
             let report = if status {
                 completion::status(&destination)?
             } else {
-                completion::rebuild(fpath.as_deref(), &destination)?
+                completion::rebuild(fpath.as_deref(), man_dir.as_deref(), &destination)?
             };
             println!("{}", serde_json::to_string_pretty(&report)?);
-            if !status && daemon::enabled() {
+            if !status && !report.unchanged && daemon::enabled() {
                 let _ = daemon::query(&daemon::Request {
                     op: "reload".into(),
                     input: String::new(),

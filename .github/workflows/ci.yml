@@ -61,6 +61,15 @@ jobs:
           ./target/release/eita index --status --cache "$RUNNER_TEMP/eita-index.json" | grep -F '"scanned_files": 1'
           EITA_COMPLETION_CACHE="$RUNNER_TEMP/eita-index.json" ./target/release/eita suggest --line 'orbit --ver' --format lines | grep -x 'orbit --verbose'
           EITA_COMPLETION_CACHE="$RUNNER_TEMP/eita-index.json" ./target/release/eita suggest --line 'orbit dep' --format lines | grep -x 'orbit deploy'
+          # V2 index: reuse unchanged Zsh + manpage files without rewriting disk.
+          ./target/release/eita index --refresh --fpath "$GITHUB_WORKSPACE/tests/fixtures" --man-dir "$GITHUB_WORKSPACE/tests/fixtures" --cache "$RUNNER_TEMP/eita-v2.json" > "$RUNNER_TEMP/eita-v2-first.json"
+          cat "$RUNNER_TEMP/eita-v2-first.json"
+          grep -F '"updated_files": 2' "$RUNNER_TEMP/eita-v2-first.json"
+          ./target/release/eita index --refresh --fpath "$GITHUB_WORKSPACE/tests/fixtures" --man-dir "$GITHUB_WORKSPACE/tests/fixtures" --cache "$RUNNER_TEMP/eita-v2.json" | grep -F '"unchanged": true'
+          ./target/release/eita index --refresh --fpath "$GITHUB_WORKSPACE/tests/fixtures" --man-dir "$GITHUB_WORKSPACE/tests/fixtures" --cache "$RUNNER_TEMP/eita-v2.json" | grep -F '"reused_files": 2'
+          EITA_COMPLETION_CACHE="$RUNNER_TEMP/eita-v2.json" ./target/release/eita suggest --line 'orbit --ver' --format lines | grep -x 'orbit --verbose'
+          EITA_COMPLETION_CACHE="$RUNNER_TEMP/eita-v2.json" ./target/release/eita suggest --line 'orbit de' --format lines | grep -x 'orbit deploy'
+
           test -n "$(./target/release/eita inline --left 'git com')"
           test -z "$(./target/release/eita inline --left 'got')"
           EITA_USAGE_ENABLED=1 EITA_USAGE_FILE="$RUNNER_TEMP/eita-usage.json" ./target/release/eita usage record --line 'git commit -m never-persist-this'

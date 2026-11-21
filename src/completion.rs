@@ -6,23 +6,34 @@
 
 use crate::catalog::Candidate;
 use serde::{Deserialize, Serialize};
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::env;
 use std::error::Error;
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::time::UNIX_EPOCH;
 
-const FORMAT_VERSION: u8 = 1;
+const FORMAT_VERSION: u8 = 2;
 const MAX_FILES: usize = 2_500;
 const MAX_SOURCE_BYTES: u64 = 256 * 1024;
 const MAX_CANDIDATES: usize = 20_000;
 const MAX_CACHE_BYTES: u64 = 8 * 1024 * 1024;
+
+#[derive(Clone, Serialize, Deserialize)]
+struct Snapshot {
+    path: String,
+    size: u64,
+    modified_ns: u64,
+    records: Vec<Candidate>,
+}
 
 #[derive(Serialize, Deserialize)]
 struct Index {
     version: u8,
     scanned: usize,
     records: Vec<Candidate>,
+    #[serde(default)]
+    files: Vec<Snapshot>,
 }
 
 #[derive(Serialize)]
@@ -31,6 +42,10 @@ pub struct IndexReport {
     pub scanned_files: usize,
     pub candidates: usize,
     pub version: u8,
+    pub reused_files: usize,
+    pub updated_files: usize,
+    pub removed_files: usize,
+    pub unchanged: bool,
 }
 
 pub fn cache_path() -> PathBuf {
@@ -56,7 +71,7 @@ pub fn load() -> Vec<Candidate> {
         return Vec::new();
     };
     match serde_json::from_slice::<Index>(&bytes) {
-        Ok(index) if index.version == FORMAT_VERSION => index.records,
+        Ok(index) if index.version == FORMAT_VERSION || index.version == 1 => index.records,
         _ => Vec::new(),
     }
 }
@@ -64,88 +79,248 @@ pub fn load() -> Vec<Candidate> {
 pub fn status(path: &Path) -> Result<IndexReport, Box<dyn Error>> {
     let bytes = fs::read(path)?;
     let index: Index = serde_json::from_slice(&bytes)?;
-    if index.version != FORMAT_VERSION {
-        return Err("Cache schema incompatível; rode eita index --refresh".into());
+    if index.version != FORMAT_VERSION && index.version != 1 {
+        return Err("Unknown cache schema; run eita index --refresh".into());
     }
     Ok(IndexReport {
         path: path.display().to_string(),
         scanned_files: index.scanned,
         candidates: index.records.len(),
         version: index.version,
+        reused_files: 0,
+        updated_files: 0,
+        removed_files: 0,
+        unchanged: true,
     })
+}
+
+#[derive(Clone, Copy)]
+enum Source {
+    Zsh,
+    Man,
+}
+
+fn source_files(fpath: Option<&str>, manpath: Option<&str>) -> Vec<(PathBuf, Source)> {
+    let mut result = Vec::new();
+    for (paths, kind) in [(fpath, Source::Zsh), (manpath, Source::Man)] {
+        // The same directory may provide both _completion and foo.1 sources.
+        let mut seen_dirs = HashSet::new();
+        let Some(paths) = paths else { continue };
+        for root in paths.split(':').filter(|path| !path.is_empty()).take(128) {
+            let root = PathBuf::from(root);
+            let dirs = if matches!(kind, Source::Man) {
+                vec![root.clone(), root.join("man1"), root.join("man8")]
+            } else {
+                vec![root]
+            };
+            for directory in dirs {
+                if !seen_dirs.insert(directory.clone()) {
+                    continue;
+                }
+                let Ok(entries) = fs::read_dir(directory) else {
+                    continue;
+                };
+                let mut entries: Vec<_> = entries.flatten().map(|item| item.path()).collect();
+                entries.sort();
+                for path in entries {
+                    if result.len() >= MAX_FILES {
+                        break;
+                    }
+                    let Some(name) = path.file_name().and_then(|n| n.to_str()) else {
+                        continue;
+                    };
+                    let wanted = match kind {
+                        Source::Zsh => name.starts_with('_') && name.len() > 1,
+                        Source::Man => crate::man::command_name(name).is_some(),
+                    };
+                    if wanted {
+                        result.push((path, kind));
+                    }
+                }
+            }
+        }
+    }
+    result
+}
+
+fn timestamp(meta: &fs::Metadata) -> u64 {
+    meta.modified()
+        .ok()
+        .and_then(|mtime| mtime.duration_since(UNIX_EPOCH).ok())
+        .and_then(|duration| u64::try_from(duration.as_nanos()).ok())
+        .unwrap_or(0)
+}
+
+fn report(
+    destination: &Path,
+    scanned: usize,
+    candidates: usize,
+    reused: usize,
+    updated: usize,
+    removed: usize,
+    unchanged: bool,
+) -> IndexReport {
+    IndexReport {
+        path: destination.display().to_string(),
+        scanned_files: scanned,
+        candidates,
+        version: FORMAT_VERSION,
+        reused_files: reused,
+        updated_files: updated,
+        removed_files: removed,
+        unchanged,
+    }
 }
 
 pub fn rebuild(
     fpath_override: Option<&str>,
+    man_override: Option<&str>,
     destination: &Path,
 ) -> Result<IndexReport, Box<dyn Error>> {
     let fpath = fpath_override
         .map(str::to_owned)
         .or_else(|| env::var("EITA_FPATH").ok())
-        .or_else(|| env::var("FPATH").ok())
-        .ok_or("FPATH ausente. Carregue o plugin Zsh ou use --fpath /diretório")?;
-    let mut scanned = 0;
-    let mut records: Vec<Candidate> = Vec::new();
-    let mut seen = HashSet::<String>::new();
-    let mut visited = HashSet::<PathBuf>::new();
+        .or_else(|| env::var("FPATH").ok());
+    // Manpage indexing is explicitly enabled; never run arbitrary binaries.
+    let manpath = man_override
+        .map(str::to_owned)
+        .or_else(|| env::var("EITA_MANPATH").ok());
+    if fpath.is_none() && manpath.is_none() {
+        return Err("No FPATH or man directory; pass --fpath or --man-dir".into());
+    }
 
-    for directory in fpath.split(':').filter(|path| !path.is_empty()).take(128) {
-        let directory = PathBuf::from(directory);
-        if !visited.insert(directory.clone()) {
-            continue;
+    let old: Option<Index> = fs::metadata(destination)
+        .ok()
+        .filter(|meta| meta.len() <= MAX_CACHE_BYTES)
+        .and_then(|_| fs::read(destination).ok())
+        .and_then(|bytes| serde_json::from_slice(&bytes).ok())
+        .filter(|index: &Index| index.version == FORMAT_VERSION);
+    let old_count = old.as_ref().map_or(0, |index| index.files.len());
+    let previous: HashMap<String, Snapshot> = old
+        .map(|index| {
+            index
+                .files
+                .into_iter()
+                .map(|item| (item.path.clone(), item))
+                .collect()
+        })
+        .unwrap_or_default();
+
+    let mut files = Vec::new();
+    let mut reused = 0;
+    let mut updated = 0;
+    let mut all_records = Vec::new();
+    let mut seen_values = HashSet::new();
+    let mut seen_paths = HashSet::new();
+    for (path, source) in source_files(fpath.as_deref(), manpath.as_deref()) {
+        if all_records.len() >= MAX_CANDIDATES {
+            break;
         }
-        let Ok(entries) = fs::read_dir(directory) else {
+        let Ok(meta) = fs::symlink_metadata(&path) else {
             continue;
         };
-        for entry in entries.flatten() {
-            if scanned >= MAX_FILES || records.len() >= MAX_CANDIDATES {
+        if !meta.file_type().is_file() || meta.len() > MAX_SOURCE_BYTES {
+            continue;
+        }
+        let key = path.to_string_lossy().into_owned();
+        if !seen_paths.insert(key.clone()) {
+            continue;
+        }
+        let stamp = timestamp(&meta);
+        let (records, reused_file) = if let Some(cached) = previous.get(&key) {
+            if cached.size == meta.len() && cached.modified_ns == stamp {
+                (cached.records.clone(), true)
+            } else {
+                (parse_file(&path, source), false)
+            }
+        } else {
+            (parse_file(&path, source), false)
+        };
+        if reused_file {
+            reused += 1;
+        } else {
+            updated += 1;
+        }
+        for record in &records {
+            if all_records.len() >= MAX_CANDIDATES {
                 break;
             }
-            let path = entry.path();
-            let Some(name) = path.file_name().and_then(|name| name.to_str()) else {
-                continue;
-            };
-            if !name.starts_with('_') || name.len() < 2 {
-                continue;
-            }
-            let Ok(meta) = fs::metadata(&path) else {
-                continue;
-            };
-            if !meta.is_file() || meta.len() > MAX_SOURCE_BYTES {
-                continue;
-            }
-            let Ok(source) = fs::read_to_string(&path) else {
-                continue;
-            };
-            scanned += 1;
-            for record in parse_source(name, &source) {
-                if records.len() >= MAX_CANDIDATES {
-                    break;
-                }
-                if seen.insert(record.value.clone()) {
-                    records.push(record);
-                }
+            if seen_values.insert(record.value.clone()) {
+                all_records.push(record.clone());
             }
         }
+        files.push(Snapshot {
+            path: key,
+            size: meta.len(),
+            modified_ns: stamp,
+            records,
+        });
     }
-    records.sort_by(|a, b| a.value.cmp(&b.value));
+    // Compare exact key sets instead of relying on directory iteration order.
+    let removed = previous
+        .keys()
+        .filter(|key| !seen_paths.contains(*key))
+        .count();
+    let scanned = files.len();
+    let unchanged = updated == 0 && removed == 0 && old_count == scanned;
+    if unchanged {
+        return Ok(report(
+            destination,
+            scanned,
+            all_records.len(),
+            reused,
+            0,
+            0,
+            true,
+        ));
+    }
+
+    all_records.sort_by(|a, b| a.value.cmp(&b.value));
     let index = Index {
         version: FORMAT_VERSION,
         scanned,
-        records,
+        records: all_records,
+        files,
     };
     if let Some(parent) = destination.parent() {
         fs::create_dir_all(parent)?;
     }
     let temporary = destination.with_extension(format!("{}.tmp", std::process::id()));
-    fs::write(&temporary, serde_json::to_vec(&index)?)?;
+    let encoded = serde_json::to_vec(&index)?;
+    if encoded.len() as u64 > MAX_CACHE_BYTES {
+        return Err("Completion cache exceeds 8 MiB; reduce indexed directories".into());
+    }
+    fs::write(&temporary, encoded)?;
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
         fs::set_permissions(&temporary, fs::Permissions::from_mode(0o600))?;
     }
     fs::rename(&temporary, destination)?;
-    status(destination)
+    Ok(report(
+        destination,
+        scanned,
+        index.records.len(),
+        reused,
+        updated,
+        removed,
+        false,
+    ))
+}
+
+fn parse_file(path: &Path, source: Source) -> Vec<Candidate> {
+    match source {
+        Source::Zsh => path
+            .file_name()
+            .and_then(|n| n.to_str())
+            .and_then(|name| {
+                fs::read_to_string(path)
+                    .ok()
+                    .map(|text| parse_source(name, &text))
+            })
+            .unwrap_or_default(),
+        Source::Man => crate::man::read(path).unwrap_or_default(),
+    }
 }
 
 fn parse_source(filename: &str, source: &str) -> Vec<Candidate> {
@@ -329,6 +504,64 @@ mod tests {
     fn ignores_evaluated_completion_code() {
         let text = "#compdef orbit\n_arguments \"$DYNAMIC\" \"$(evil)\"";
         assert!(parse_source("_orbit", text).is_empty());
+    }
+
+    #[test]
+    fn incremental_index_reuses_unchanged_sources_and_detects_removal() {
+        let root = std::env::temp_dir().join(format!(
+            "eita-index-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        fs::create_dir_all(&root).unwrap();
+        fs::write(root.join("_orbit"), FIXTURE).unwrap();
+        let destination = root.join("index.json");
+        let directory = root.to_str().unwrap();
+        let first = rebuild(Some(directory), None, &destination).unwrap();
+        assert_eq!(first.updated_files, 1);
+        assert_eq!(first.reused_files, 0);
+        let second = rebuild(Some(directory), None, &destination).unwrap();
+        assert!(second.unchanged);
+        assert_eq!(second.reused_files, 1);
+        assert_eq!(second.updated_files, 0);
+        fs::remove_file(root.join("_orbit")).unwrap();
+        let third = rebuild(Some(directory), None, &destination).unwrap();
+        assert_eq!(third.removed_files, 1);
+        assert_eq!(third.candidates, 0);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn imports_manpages_only_from_explicit_directory() {
+        let root = std::env::temp_dir().join(format!(
+            "eita-man-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        fs::create_dir_all(root.join("man1")).unwrap();
+        fs::write(
+            root.join("man1/orbit.1"),
+            include_str!("../tests/fixtures/orbit.1"),
+        )
+        .unwrap();
+        let destination = root.join("index.json");
+        let first = rebuild(None, Some(root.to_str().unwrap()), &destination).unwrap();
+        assert!(first.updated_files >= 1);
+        assert!(load_records(&destination)
+            .iter()
+            .any(|item| item.value == "orbit --verbose"));
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    fn load_records(path: &Path) -> Vec<Candidate> {
+        let encoded = fs::read(path).unwrap();
+        serde_json::from_slice::<Index>(&encoded).unwrap().records
     }
 
     #[test]
