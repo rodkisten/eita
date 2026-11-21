@@ -1,6 +1,6 @@
 //! Passive Zsh completion inspection. Does not source or execute completion functions.
 use crate::specs::{CommandSpec, FlagSpec};
-use std::{collections::HashSet, env, fs, path::{Path, PathBuf}};
+use std::{collections::HashSet, env, fs, path::PathBuf};
 
 fn directories() -> Vec<PathBuf> {
     let mut paths: Vec<PathBuf> = env::var_os("FPATH")
