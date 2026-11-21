@@ -96,7 +96,7 @@ Default location: `$XDG_CACHE_HOME/eita/path-index.json` or `~/.cache/eita/path-
 | Custom TSV specs | ✅ | `command<TAB>description` |
 | Zsh aliases, functions and `fpath` definitions | 🗓️ | Shell adapter and incremental index |
 | Native `_arguments` / `compdef` specs | 🗓️ | Structured completion knowledge |
-| Passive man-page extraction | 🧪 | Experimental: uncompressed section 1/8 pages, simple roff flags only |\n| Compressed man pages, nested commands and `--help` | 🗓️ | Rich parsing and trusted opt-in probing |
+| Passive man-page extraction | 🧪 | Experimental: plain/gzip section 1/8 pages, simple roff flags, metadata cache |\n| Nested man-page commands and `--help` | 🗓️ | Rich parsing and trusted opt-in probing |
 | Declared positional values and flag values | ✅ | JSON schemas, static values |
 | Dynamic argument value providers | 🗓️ | Context-sensitive runtime sources |
 
@@ -111,7 +111,7 @@ Use a **literal tab** between the command and description.
 
 ### 🧠 Learning from installed documentation
 
-Eita now includes an **experimental passive man-page reader**. When suggesting a command, it checks local uncompressed man pages in sections 1 and 8 for simple roff flag declarations. This does not execute the command or run a man renderer. Coverage is currently limited: compressed pages, advanced roff macros, nested subcommands, option descriptions and dynamic argument types need further work.
+Eita now includes an **experimental passive man-page reader**. When suggesting a command, it checks local uncompressed and gzip-compressed man pages in sections 1 and 8 for simple roff flag declarations. This does not execute the command or run a man renderer. Coverage is currently limited: advanced roff macros, nested subcommands, option descriptions and dynamic argument types need further work.
 
 **Long-term source precedence:** installed Zsh completions and documented CLI schemas → parsed man pages → explicitly trusted `--help` probes → user JSON fallback. Actual source reconciliation, provenance and persistent knowledge caching are planned; today the JSON and passive man results are combined. JSON is primarily for fixtures and undocumented tools.
 
@@ -142,7 +142,7 @@ Each entry declares a full `command` path, optional `flags` with `name`, `descri
 - [ ] Cursor-aware edits preserving surrounding text, quoting and pipes
 - [ ] Unknown-command correction with ranked suggestions
 - [ ] Persistent ranking from local command history (opt-in)
-- [ ] Zsh aliases, functions, completions and `fpath` index
+- [ ] Zsh aliases, functions, completions and `fpath` index\n- [x] Experimental gzip man-page parsing and fingerprint-based knowledge cache
 - [x] Structured JSON specs for command paths, flags, positional values and static flag values
 - [ ] Dynamic value providers, shell-aware quoting and fuzzy ranking for spec values
 - [ ] Background service / daemon with optional file-system notifications
