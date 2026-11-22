@@ -282,7 +282,8 @@ jobs:
               + '/releases/download/' + tag + '/eita-x86_64-unknown-linux-gnu.tar.gz';
             const lines = [
               marker, '## 🦀 Eita · preview instalável', '',
-              '✅ Commit: ' + sha.slice(0, 12), '',
+              '✅ Commit: `' + sha.slice(0, 12) + '`',
+              '🕒 Published: ' + new Date().toISOString(), '' ,
               '**Instalar a build mais recente deste PR:**',
               '~~~sh', 'curl -fsSL ' + shortUrl + ' | sh', '~~~', '',
               '🔗 **Instalador:** ' + shortUrl,
