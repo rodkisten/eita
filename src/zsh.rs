@@ -4,7 +4,7 @@ use std::{collections::HashSet, env, fs, path::PathBuf, time::UNIX_EPOCH};
 use serde::{Serialize, Deserialize};
 
 #[derive(Serialize, Deserialize)]
-struct Cache { fingerprint: String, flags: Vec<FlagSpec> }
+struct Cache { fingerprint: String, specs: Vec<CommandSpec> }
 
 fn cache_file(root: &str) -> Option<PathBuf> {
     let base = env::var_os("EITA_CACHE_DIR").map(PathBuf::from)
@@ -60,6 +60,38 @@ fn extract(source: &str) -> Vec<FlagSpec> {
     }
     result
 }
+/// Recognize static command:description pairs in _describe/_values-style arrays.
+/// Dynamic shell substitutions are deliberately ignored.
+fn extract_subcommands(root: &str, source: &str) -> Vec<CommandSpec> {
+    let mut commands = Vec::new();
+    let mut seen = HashSet::new();
+    let mut in_array = false;
+    for line in source.lines() {
+        let trimmed = line.trim();
+        if trimmed.starts_with('#') { continue; }
+        if trimmed.contains("=(") || trimmed.contains("= (") { in_array = true; }
+        if !in_array { continue; }
+        for quote in ['\'', '"'] {
+            for part in trimmed.split(quote).skip(1).step_by(2) {
+                let Some((name, _description)) = part.split_once(':') else { continue };
+                if name.is_empty() || !name.chars().all(|c| c.is_ascii_alphanumeric() || "-_".contains(c)) { continue; }
+                if seen.insert(name.to_owned()) {
+                    commands.push(CommandSpec { command: format!("{root} {name}"), flags: vec![], arguments: vec![] });
+                }
+            }
+        }
+        if trimmed.contains(')') { in_array = false; }
+    }
+    commands
+}
+fn parsed(root: &str, source: &str) -> Vec<CommandSpec> {
+    let mut specs = extract_subcommands(root, source);
+    let flags = extract(source);
+    if !flags.is_empty() {
+        specs.insert(0, CommandSpec { command: root.into(), flags, arguments: vec![] });
+    }
+    specs
+}
 pub fn learn(root: &str) -> Vec<CommandSpec> {
     if root.is_empty() || !root.chars().all(|c| c.is_ascii_alphanumeric() || "-_+.".contains(c)) { return Vec::new(); }
     let Some(path) = find_file(root, &directories()) else { return Vec::new() };
@@ -72,25 +104,24 @@ pub fn learn(root: &str) -> Vec<CommandSpec> {
         if let Ok(bytes) = fs::read(file) {
             if let Ok(saved) = serde_json::from_slice::<Cache>(&bytes) {
                 if saved.fingerprint == fingerprint {
-                    return vec![CommandSpec { command: root.into(), flags: saved.flags, arguments: vec![] }];
+                    return saved.specs;
                 }
             }
         }
     }
     let Ok(source) = fs::read_to_string(&path) else { return Vec::new() };
-    let flags = extract(&source);
+    let specs = parsed(root, &source);
     if let Some(file) = cache {
         if let Some(dir) = file.parent() {
             if fs::create_dir_all(dir).is_ok() {
-                if let Ok(bytes) = serde_json::to_vec(&Cache { fingerprint, flags: flags.clone() }) {
+                if let Ok(bytes) = serde_json::to_vec(&Cache { fingerprint, specs: specs.clone() }) {
                     let temp = file.with_extension(format!("{}.tmp", std::process::id()));
                     if fs::write(&temp, bytes).is_ok() { let _ = fs::rename(&temp, &file); }
                 }
             }
         }
     }
-    if flags.is_empty() { return Vec::new(); }
-    vec![CommandSpec { command: root.into(), flags, arguments: vec![] }]
+    specs
 }
 #[cfg(test)]
 mod tests {
@@ -106,6 +137,12 @@ mod tests {
         let flags = extract("_arguments '--output=[Output file]:file:' '--verbose[Verbose]'");
         assert!(flags.iter().any(|flag| flag.name == "--output" && flag.takes_value));
         assert!(flags.iter().any(|flag| flag.name == "--verbose" && !flag.takes_value));
+    }
+    #[test]
+    fn discovers_static_subcommand_pairs() {
+        let specs = parsed("demo", "local -a commands=(\n  'build:Build project'\n  'test:Run tests'\n)\n_describe 'command' commands");
+        assert!(specs.iter().any(|spec| spec.command == "demo build"));
+        assert!(specs.iter().any(|spec| spec.command == "demo test"));
     }
     #[test]
     fn ignores_comments() {
