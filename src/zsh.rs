@@ -102,6 +102,12 @@ mod tests {
         assert!(result.iter().any(|flag| flag.name == "--cleanup" && flag.takes_value));
     }
     #[test]
+    fn parses_value_taking_options() {
+        let flags = extract("_arguments '--output=[Output file]:file:' '--verbose[Verbose]'");
+        assert!(flags.iter().any(|flag| flag.name == "--output" && flag.takes_value));
+        assert!(flags.iter().any(|flag| flag.name == "--verbose" && !flag.takes_value));
+    }
+    #[test]
     fn ignores_comments() {
         assert!(extract("# '--danger[not active]'").is_empty());
     }
