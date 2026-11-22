@@ -200,13 +200,13 @@ jobs:
             echo "Skipping outdated preview $COMMIT_SHA (current: $latest)"
             exit 0
           fi
-          npm install --no-save wrangler@4
+          npx --yes wrangler@4 --version
           archive="eita-x86_64-unknown-linux-gnu.tar.gz"
           checksum="$(sha256sum "dist/$archive" | awk '{print $1}')"
           printf '{"sha":"%s","sha256":"%s","archive":"%s"}\\n' "$COMMIT_SHA" "$checksum" "$archive" > dist/manifest.json
           for prefix in "pr/$PR_NUMBER" preview; do
             for name in "$archive" "$archive.sha256" manifest.json; do
-              npx wrangler r2 object put "eita-previews/$prefix/$name" --file "dist/$name" --remote
+              npx --yes wrangler@4 r2 object put "eita-previews/$prefix/$name" --file "dist/$name" --remote
             done
           done
       - name: Publish moving PR prerelease and update comment
@@ -309,6 +309,17 @@ jobs:
     permissions:
       contents: write
     steps:
+      - name: Remove temporary R2 artifacts for closed PR
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          for name in eita-x86_64-unknown-linux-gnu.tar.gz eita-x86_64-unknown-linux-gnu.tar.gz.sha256 manifest.json; do
+            npx --yes wrangler@4 r2 object delete "eita-previews/pr/$PR_NUMBER/$name" --remote
+          done
       - uses: actions/github-script@v8
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
