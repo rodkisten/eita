@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use std::{env, fs, path::PathBuf};
 
-#[derive(Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct CommandSpec {
     pub command: String,
     #[serde(default)]
@@ -19,7 +19,7 @@ pub struct FlagSpec {
     #[serde(default)]
     pub takes_value: bool,
 }
-#[derive(Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct ArgumentSpec {
     pub name: String,
     #[serde(default)]
