@@ -111,7 +111,7 @@ Use a **literal tab** between the command and description.
 
 ### 🐚 Learning from Zsh completion definitions
 
-The experimental passive reader checks `FPATH` for `_command` completion files, including one level of category subdirectories. It recognizes simple quoted option specifications such as `'--amend[Amend previous commit]'` and `'--cleanup=-[Cleanup mode]'`. It **never sources shell functions**. This is a narrow static extraction, not execution of the Zsh completion engine: dynamically generated options, `compdef` aliases, nested subcommands, `_describe` and conditional specifications are not supported yet. The reader now persists parsed flags under `$XDG_CACHE_HOME/eita/zsh-<command>.json` (or `~/.cache/eita/`), invalidating entries when the source path, file size or modification time changes. It still performs a lightweight filesystem lookup on each suggestion.
+The experimental passive reader checks `FPATH` for `_command` completion files, including one level of category subdirectories. It recognizes simple quoted option specifications such as `'--amend[Amend previous commit]'` and `'--cleanup=-[Cleanup mode]'`. It **never sources shell functions**. This is a narrow static extraction, not execution of the Zsh completion engine: dynamically generated options, `compdef` aliases and conditional specifications are not supported yet. Static quoted `command:description` entries in array declarations are now recognized as experimental child commands; this is not a complete `_describe` interpreter. The reader now persists parsed flags under `$XDG_CACHE_HOME/eita/zsh-<command>.json` (or `~/.cache/eita/`), invalidating entries when the source path, file size or modification time changes. It still performs a lightweight filesystem lookup on each suggestion.
 
 ### 🧠 Learning from installed documentation
 
@@ -146,7 +146,7 @@ Each entry declares a full `command` path, optional `flags` with `name`, `descri
 - [ ] Cursor-aware edits preserving surrounding text, quoting and pipes
 - [ ] Unknown-command correction with ranked suggestions
 - [ ] Persistent ranking from local command history (opt-in)
-- [x] Experimental passive Zsh completion file scanning for simple quoted flags\n- [x] Persistent metadata-invalidated Zsh completion cache\n- [x] Parent-command flag inheritance for structured specs\n- [x] Merge duplicate command paths and flags across Zsh, man and JSON sources\n- [x] Complete child commands from discovered structured command paths\n- [ ] Zsh aliases, functions, live `compdef` mapping and comprehensive `fpath` index\n- [x] Experimental gzip man-page parsing and fingerprint-based knowledge cache
+- [x] Experimental passive Zsh completion file scanning for simple quoted flags\n- [x] Persistent metadata-invalidated Zsh completion cache\n- [x] Parent-command flag inheritance for structured specs\n- [x] Merge duplicate command paths and flags across Zsh, man and JSON sources\n- [x] Complete child commands from discovered structured command paths\n- [x] Experimental extraction of static Zsh array command:description pairs into cached child paths\n- [ ] Zsh aliases, functions, live `compdef` mapping and comprehensive `fpath` index\n- [x] Experimental gzip man-page parsing and fingerprint-based knowledge cache
 - [x] Structured JSON specs for command paths, flags, positional values and static flag values
 - [ ] Dynamic value providers, shell-aware quoting and fuzzy ranking for spec values
 - [ ] Background service / daemon with optional file-system notifications
