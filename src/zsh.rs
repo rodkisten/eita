@@ -80,7 +80,7 @@ fn extract_subcommands(root: &str, source: &str) -> Vec<CommandSpec> {
                 }
             }
         }
-        if trimmed.contains(')') { in_array = false; }
+        if trimmed.starts_with(')') || (trimmed.contains(')') && !trimmed.contains("=(") && !trimmed.contains("= (")) { in_array = false; }
     }
     commands
 }
