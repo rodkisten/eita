@@ -77,6 +77,15 @@ pub fn complete(specs: &[CommandSpec], line: &str) -> Vec<Completion> {
         let path: Vec<&str> = spec.command.split_whitespace().collect();
         (completed.len() >= path.len() && completed[..path.len()] == path[..]).then_some(path.len())
     }).max().unwrap_or(0);
+    // Suggest discovered child commands at the active path, not just options.
+    for spec in specs {
+        let path: Vec<&str> = spec.command.split_whitespace().collect();
+        if path.len() <= completed.len() || path[..completed.len()] != completed[..] { continue; }
+        let child = path[completed.len()];
+        if child.starts_with(active) && seen.insert(child.to_owned()) {
+            result.push(Completion { value: child.to_owned(), description: format!("Subcommand of {}", completed.join(" ")) });
+        }
+    }
     for spec in specs {
         let path: Vec<&str> = spec.command.split_whitespace().collect();
         if completed.len() < path.len() || completed[..path.len()] != path[..] { continue; }
@@ -156,6 +165,13 @@ mod tests {
         assert_eq!(merged.len(), 1);
         assert_eq!(merged[0].flags.len(), 2);
         assert_eq!(merged[0].flags[0].description, "Zsh");
+    }
+    #[test]
+    fn completes_child_commands() {
+        let specs: Vec<CommandSpec> = serde_json::from_str(r#"[{"command":"git commit"},{"command":"git checkout"}]"#).unwrap();
+        let values: Vec<_> = complete(&specs, "git com").into_iter().map(|item| item.value).collect();
+        assert!(values.contains(&"commit".to_owned()));
+        assert!(!values.contains(&"checkout".to_owned()));
     }
     #[test]
     fn positional_values() {
