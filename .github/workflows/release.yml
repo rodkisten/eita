@@ -211,8 +211,8 @@ jobs:
           npx --yes wrangler@4 --version
           archive="eita-x86_64-unknown-linux-gnu.tar.gz"
           checksum="$(sha256sum "dist/$archive" | awk '{print $1}')"
-          printf '{"sha":"%s","sha256":"%s","archive":"%s"}\\n' "$COMMIT_SHA" "$checksum" "$archive" > dist/manifest.json
-          for prefix in "pr/$PR_NUMBER" preview; do
+          printf '{"sha":"%s","sha256":"%s","archive":"%s"}\n' "$COMMIT_SHA" "$checksum" "$archive" > dist/manifest.json
+          for prefix in "pr/$PR_NUMBER"; do
             for name in "$archive" "$archive.sha256" manifest.json; do
               npx --yes wrangler@4 r2 object put "eita-previews/$prefix/$name" --file "dist/$name" --remote
             done
@@ -326,7 +326,7 @@ jobs:
         run: |
           set -euo pipefail
           for name in eita-x86_64-unknown-linux-gnu.tar.gz eita-x86_64-unknown-linux-gnu.tar.gz.sha256 manifest.json; do
-            npx --yes wrangler@4 r2 object delete "eita-previews/pr/$PR_NUMBER/$name" --remote
+            npx --yes wrangler@4 r2 object delete "eita-previews/pr/$PR_NUMBER/$name" --remote || echo "::warning::Unable to remove $name (already removed or R2 unavailable)"
           done
       - uses: actions/github-script@v8
         with:
