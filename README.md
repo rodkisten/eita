@@ -131,7 +131,7 @@ eita suggest --line 'gh pr list --state mer'
 eita pick --line 'docker compose up --pu'
 ```
 
-Each entry declares a full `command` path, optional `flags` with `name`, `description`, `takes_value`, `values`, and optional `arguments` with `name` and static `values`. The engine resolves the command path first, then offers valid flags and declared values. Flags from parent command paths are inherited by child commands, while positional values remain scoped to their declaring path. JSON files are read locally; Eita does not execute the described commands. Values are currently prefix-matched.
+Each entry declares a full `command` path, optional `flags` with `name`, `description`, `takes_value`, `values`, and optional `arguments` with `name` and static `values`. The engine resolves the command path first, then offers valid flags and declared values. Flags from parent command paths are inherited by child commands, while positional values remain scoped to their declaring path. Declared child command paths are also offered as subcommand suggestions. JSON files are read locally; Eita does not execute the described commands. Values are currently prefix-matched.
 
 ## 🎛️ Experience roadmap
 
@@ -146,7 +146,7 @@ Each entry declares a full `command` path, optional `flags` with `name`, `descri
 - [ ] Cursor-aware edits preserving surrounding text, quoting and pipes
 - [ ] Unknown-command correction with ranked suggestions
 - [ ] Persistent ranking from local command history (opt-in)
-- [x] Experimental passive Zsh completion file scanning for simple quoted flags\n- [x] Persistent metadata-invalidated Zsh completion cache\n- [x] Parent-command flag inheritance for structured specs\n- [x] Merge duplicate command paths and flags across Zsh, man and JSON sources\n- [ ] Zsh aliases, functions, live `compdef` mapping and comprehensive `fpath` index\n- [x] Experimental gzip man-page parsing and fingerprint-based knowledge cache
+- [x] Experimental passive Zsh completion file scanning for simple quoted flags\n- [x] Persistent metadata-invalidated Zsh completion cache\n- [x] Parent-command flag inheritance for structured specs\n- [x] Merge duplicate command paths and flags across Zsh, man and JSON sources\n- [x] Complete child commands from discovered structured command paths\n- [ ] Zsh aliases, functions, live `compdef` mapping and comprehensive `fpath` index\n- [x] Experimental gzip man-page parsing and fingerprint-based knowledge cache
 - [x] Structured JSON specs for command paths, flags, positional values and static flag values
 - [ ] Dynamic value providers, shell-aware quoting and fuzzy ranking for spec values
 - [ ] Background service / daemon with optional file-system notifications
