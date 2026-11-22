@@ -211,7 +211,7 @@ jobs:
           npx --yes wrangler@4 --version
           archive="eita-x86_64-unknown-linux-gnu.tar.gz"
           checksum="$(sha256sum "dist/$archive" | awk '{print $1}')"
-          printf '{"sha":"%s","sha256":"%s","archive":"%s"}\n' "$COMMIT_SHA" "$checksum" "$archive" > dist/manifest.json
+          jq -nc --arg sha "$COMMIT_SHA" --arg sha256 "$checksum" --arg archive "$archive" '{sha:$sha,sha256:$sha256,archive:$archive}' > dist/manifest.json
           for prefix in "pr/$PR_NUMBER"; do
             for name in "$archive" "$archive.sha256" manifest.json; do
               npx --yes wrangler@4 r2 object put "eita-previews/$prefix/$name" --file "dist/$name" --remote
