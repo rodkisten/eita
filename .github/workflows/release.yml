@@ -197,6 +197,14 @@ jobs:
           for name in "$archive" "$archive.sha256" manifest.json; do
             npx --yes wrangler@4 r2 object put "eita-previews/preview/$name" --file "dist/$name" --remote
           done
+          echo "Checking published preview endpoints..."
+          base="https://shell.migos.club/install/eita/preview"
+          for endpoint in manifest.json checksum artifact; do
+            curl --fail --silent --show-error --retry 5 --retry-delay 3 --head "$base/$endpoint" > /dev/null
+          done
+          curl --fail --silent --show-error --retry 5 --retry-delay 3 "$base/manifest.json" |
+            jq -e --arg sha "$GITHUB_SHA" --arg checksum "$sha256" '.sha == $sha and .sha256 == $checksum' > /dev/null
+          curl --fail --silent --show-error "$base" | grep -F 'sha256sum -c -' > /dev/null
           echo "## 🦀 Temporary main preview" >> "$GITHUB_STEP_SUMMARY"
           echo "Install: \`curl -fsSL https://shell.migos.club/install/eita/preview | sh\`" >> "$GITHUB_STEP_SUMMARY"
           echo "Commit: \`$GITHUB_SHA\`" >> "$GITHUB_STEP_SUMMARY"
